@@ -85,10 +85,9 @@ pub const LRUCache = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        // 不使用mutex，因为在deinit时不应该有并发访问
 
-        // 清理所有项
+        // 简化清理：只清理CacheItem，让HashMap自己管理key
         var iter = self.items.iterator();
         while (iter.next()) |entry| {
             entry.value_ptr.*.deinit(self.allocator);
@@ -142,6 +141,7 @@ pub const LRUCache = struct {
             }
 
             const new_item = CacheItem.init(self.allocator, key, value) catch return CacheError.OutOfMemory;
+            // 使用CacheItem的key作为HashMap的key（避免重复分配）
             self.items.put(new_item.key, new_item) catch return CacheError.OutOfMemory;
             self.addToHead(new_item);
             self.size += 1;

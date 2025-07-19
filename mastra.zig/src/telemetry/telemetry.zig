@@ -160,6 +160,9 @@ pub const Telemetry = struct {
             }
 
             self.logger.debug("Ended span: {s}", .{span.name});
+
+            // 释放span_id字符串（由startSpan中的allocPrint分配）
+            self.allocator.free(kv.key);
         }
     }
 

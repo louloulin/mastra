@@ -27,20 +27,15 @@ pub const DeepSeekError = error{
 pub const DeepSeekMessage = struct {
     role: []const u8, // "system", "user", "assistant"
     content: []const u8,
-    name: ?[]const u8 = null,
 };
 
 /// DeepSeek 请求结构
 pub const DeepSeekRequest = struct {
     model: []const u8, // "deepseek-chat", "deepseek-coder"
     messages: []const DeepSeekMessage,
-    temperature: ?f32 = null,
-    max_tokens: ?u32 = null,
-    top_p: ?f32 = null,
-    frequency_penalty: ?f32 = null,
-    presence_penalty: ?f32 = null,
+    temperature: f32 = 0.7,
+    max_tokens: u32 = 100,
     stream: bool = false,
-    stop: ?[]const []const u8 = null,
 };
 
 /// DeepSeek 响应中的选择
@@ -48,6 +43,7 @@ pub const DeepSeekChoice = struct {
     index: u32,
     message: DeepSeekMessage,
     finish_reason: ?[]const u8,
+    logprobs: ?std.json.Value = null,
 };
 
 /// DeepSeek 使用统计
@@ -55,6 +51,9 @@ pub const DeepSeekUsage = struct {
     prompt_tokens: u32,
     completion_tokens: u32,
     total_tokens: u32,
+    prompt_tokens_details: ?std.json.Value = null,
+    prompt_cache_hit_tokens: ?u32 = null,
+    prompt_cache_miss_tokens: ?u32 = null,
 };
 
 /// DeepSeek API 响应
@@ -65,6 +64,7 @@ pub const DeepSeekResponse = struct {
     model: []const u8,
     choices: []DeepSeekChoice,
     usage: DeepSeekUsage,
+    system_fingerprint: ?[]const u8 = null,
 };
 
 /// DeepSeek API 客户端
@@ -93,11 +93,38 @@ pub const DeepSeekClient = struct {
 
     /// 聊天完成请求
     pub fn chatCompletion(self: *Self, request: DeepSeekRequest) DeepSeekError!DeepSeekResponse {
-        // 序列化请求
-        const request_json = std.json.stringifyAlloc(self.allocator, request, .{}) catch {
-            return DeepSeekError.OutOfMemory;
-        };
+        // 手动构建JSON以确保格式正确
+        var json_builder = std.ArrayList(u8).init(self.allocator);
+        defer json_builder.deinit();
+
+        try json_builder.appendSlice("{");
+        try json_builder.appendSlice("\"model\":\"");
+        try json_builder.appendSlice(request.model);
+        try json_builder.appendSlice("\",\"messages\":[");
+
+        for (request.messages, 0..) |msg, i| {
+            if (i > 0) try json_builder.appendSlice(",");
+            try json_builder.appendSlice("{\"role\":\"");
+            try json_builder.appendSlice(msg.role);
+            try json_builder.appendSlice("\",\"content\":\"");
+            try json_builder.appendSlice(msg.content);
+            try json_builder.appendSlice("\"}");
+        }
+
+        try json_builder.appendSlice("],");
+        try json_builder.appendSlice("\"temperature\":");
+        try std.fmt.format(json_builder.writer(), "{d:.1}", .{request.temperature});
+        try json_builder.appendSlice(",\"max_tokens\":");
+        try std.fmt.format(json_builder.writer(), "{d}", .{request.max_tokens});
+        try json_builder.appendSlice(",\"stream\":");
+        try json_builder.appendSlice(if (request.stream) "true" else "false");
+        try json_builder.appendSlice("}");
+
+        const request_json = try self.allocator.dupe(u8, json_builder.items);
         defer self.allocator.free(request_json);
+
+        // 调试输出
+        std.debug.print("DeepSeek API 请求JSON: {s}\n", .{request_json});
 
         // 准备头部
         const auth_header = std.fmt.allocPrint(self.allocator, "Bearer {s}", .{self.api_key}) catch {
@@ -108,10 +135,16 @@ pub const DeepSeekClient = struct {
         var headers = std.ArrayList(http.Header).init(self.allocator);
         defer headers.deinit();
 
-        headers.append(.{ .name = "Authorization", .value = auth_header }) catch {
+        headers.append(.{ .name = "authorization", .value = auth_header }) catch {
             return DeepSeekError.OutOfMemory;
         };
-        headers.append(.{ .name = "Content-Type", .value = "application/json" }) catch {
+        headers.append(.{ .name = "content-type", .value = "application/json" }) catch {
+            return DeepSeekError.OutOfMemory;
+        };
+        headers.append(.{ .name = "user-agent", .value = "curl/8.4.0" }) catch {
+            return DeepSeekError.OutOfMemory;
+        };
+        headers.append(.{ .name = "accept", .value = "*/*" }) catch {
             return DeepSeekError.OutOfMemory;
         };
 
@@ -123,6 +156,9 @@ pub const DeepSeekClient = struct {
 
         // 发送请求
         var response = self.http_client.post(url, headers.items, request_json) catch |err| {
+            std.debug.print("DeepSeek API HTTP POST failed: {}\n", .{err});
+            std.debug.print("URL: {s}\n", .{url});
+            std.debug.print("Request body: {s}\n", .{request_json});
             return switch (err) {
                 else => DeepSeekError.RequestFailed,
             };

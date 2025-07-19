@@ -61,15 +61,8 @@ pub const Storage = struct {
 
             // 释放JSON对象中的内存
             if (entry.value_ptr.* == .object) {
-                var obj_iter = entry.value_ptr.object.iterator();
-                while (obj_iter.next()) |obj_entry| {
-                    if (obj_entry.value_ptr.* == .string) {
-                        // 只释放我们分配的字符串（id字符串）
-                        if (std.mem.eql(u8, obj_entry.key_ptr.*, "id")) {
-                            self.allocator.free(obj_entry.value_ptr.string);
-                        }
-                    }
-                }
+                // 注意：不要释放object中的字符串，因为id字符串和key是同一个
+                // 只需要清理object本身
                 entry.value_ptr.object.deinit();
             }
         }

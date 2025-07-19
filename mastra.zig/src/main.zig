@@ -67,7 +67,13 @@ fn demonstrateBasicFeatures(allocator: std.mem.Allocator, m: *mastra.Mastra) !vo
     };
 
     const search_results = try vector_store.search(query);
-    defer allocator.free(search_results);
+    defer {
+        // 释放每个结果中的embedding
+        for (search_results) |result| {
+            allocator.free(result.embedding);
+        }
+        allocator.free(search_results);
+    }
     std.debug.print("  ✓ 向量搜索完成，找到 {d} 个结果\n", .{search_results.len});
 
     // 7. 创建内存管理器

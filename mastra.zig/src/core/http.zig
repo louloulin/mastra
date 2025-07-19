@@ -188,13 +188,7 @@ pub const HttpClient = struct {
             });
         }
 
-        // 添加默认头部
-        if (config.body != null) {
-            try headers.append(.{
-                .name = "Content-Length",
-                .value = try std.fmt.allocPrint(self.allocator, "{d}", .{config.body.?.len}),
-            });
-        }
+        // 不手动设置Content-Length，让transfer_encoding自动处理
 
         // 创建请求
         const http_method = switch (config.method) {
@@ -207,14 +201,18 @@ pub const HttpClient = struct {
             .OPTIONS => std.http.Method.OPTIONS,
         };
 
+        // 分配足够大的头部缓冲区
+        var header_buffer: [16384]u8 = undefined; // 16KB缓冲区
+
         var req = self.client.open(
             http_method,
             uri,
             .{
-                .server_header_buffer = undefined,
+                .server_header_buffer = &header_buffer,
                 .extra_headers = headers.items,
             },
-        ) catch {
+        ) catch |err| {
+            std.debug.print("HTTP client.open() failed: {}\n", .{err});
             return HttpError.RequestFailed;
         };
         defer req.deinit();
@@ -222,28 +220,33 @@ pub const HttpClient = struct {
         // 设置请求体
         if (config.body) |body| {
             req.transfer_encoding = .{ .content_length = body.len };
-            req.send() catch {
+            req.send() catch |err| {
+                std.debug.print("HTTP req.send() with body failed: {}\n", .{err});
                 return HttpError.RequestFailed;
             };
-            req.writeAll(body) catch {
+            req.writeAll(body) catch |err| {
+                std.debug.print("HTTP req.writeAll() failed: {}\n", .{err});
                 return HttpError.RequestFailed;
             };
         } else {
-            req.send() catch {
+            req.send() catch |err| {
+                std.debug.print("HTTP req.send() without body failed: {}\n", .{err});
                 return HttpError.RequestFailed;
             };
         }
 
-        req.finish() catch {
+        req.finish() catch |err| {
+            std.debug.print("HTTP req.finish() failed: {}\n", .{err});
             return HttpError.RequestFailed;
         };
-        req.wait() catch {
+        req.wait() catch |err| {
+            std.debug.print("HTTP req.wait() failed: {}\n", .{err});
             return HttpError.RequestFailed;
         };
 
         // 读取响应
-        const phrase_len = if (req.response.status.phrase()) |phrase| phrase.len else 0;
-        var response = Response.init(self.allocator, @intCast(phrase_len));
+        const status_code = @intFromEnum(req.response.status);
+        var response = Response.init(self.allocator, status_code);
 
         // 读取响应头
         var header_iter = req.response.iterateHeaders();

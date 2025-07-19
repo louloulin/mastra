@@ -44,7 +44,7 @@ pub const Agent = struct {
 
     pub fn init(allocator: std.mem.Allocator, config: AgentConfig) !*Agent {
         const agent = try allocator.create(Agent);
-        
+
         var tools = std.ArrayList(*Tool).init(allocator);
         if (config.tools) |tool_list| {
             try tools.appendSlice(tool_list.items);
@@ -71,6 +71,7 @@ pub const Agent = struct {
         if (self.memory) |memory| {
             memory.deinit();
         }
+        self.logger.deinit();
         self.allocator.destroy(self);
     }
 
@@ -92,21 +93,26 @@ pub const Agent = struct {
             try formatted_messages.append(msg);
         }
 
-        const response = try self.model.generate(self.allocator, formatted_messages.items);
+        const response = try self.model.generate(formatted_messages.items, null);
 
         if (self.memory) |memory| {
             for (messages) |msg| {
-                try memory.addMessage(msg);
+                try memory.addMessage(.{ .role = msg.role, .content = msg.content });
             }
             try memory.addMessage(.{ .role = "assistant", .content = response.content });
         }
 
-        return response;
+        // 转换GenerateResult为AgentResponse
+        return AgentResponse{
+            .content = response.content,
+            .usage = null,
+            .metadata = null,
+        };
     }
 
     pub fn stream(self: *Agent, messages: []const Message) !void {
         self.logger.info("Agent {s} streaming response for {d} messages", .{ self.name, messages.len });
-        
+
         var formatted_messages = std.ArrayList(Message).init(self.allocator);
         defer formatted_messages.deinit();
 

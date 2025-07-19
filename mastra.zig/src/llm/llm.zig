@@ -360,11 +360,21 @@ pub const LLM = struct {
         }
 
         // 构建请求
+        const temperature = if (options) |opts|
+            if (opts.temperature) |temp| temp else self.config.temperature
+        else
+            self.config.temperature;
+
+        const max_tokens = if (options) |opts|
+            if (opts.max_tokens) |tokens| tokens else (self.config.max_tokens orelse 100)
+        else
+            (self.config.max_tokens orelse 100);
+
         const request = DeepSeekRequest{
             .model = self.config.model,
             .messages = deepseek_messages.items,
-            .temperature = if (options) |opts| opts.temperature else self.config.temperature,
-            .max_tokens = if (options) |opts| opts.max_tokens else self.config.max_tokens,
+            .temperature = temperature,
+            .max_tokens = max_tokens,
             .stream = false,
         };
 
