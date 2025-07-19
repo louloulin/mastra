@@ -1,11 +1,17 @@
 const std = @import("std");
 const AgentResponse = @import("../agent/agent.zig").AgentResponse;
-const Message = @import("../agent/agent.zig").Message;
+pub const Message = @import("../agent/agent.zig").Message;
 const HttpClient = @import("../core/http.zig").HttpClient;
 const Header = @import("../core/http.zig").Header;
-const OpenAIClient = @import("openai.zig").OpenAIClient;
-const OpenAIRequest = @import("openai.zig").OpenAIRequest;
-const OpenAIMessage = @import("openai.zig").OpenAIMessage;
+pub const OpenAIClient = @import("openai.zig").OpenAIClient;
+pub const OpenAIRequest = @import("openai.zig").OpenAIRequest;
+pub const OpenAIResponse = @import("openai.zig").OpenAIResponse;
+pub const OpenAIMessage = @import("openai.zig").OpenAIMessage;
+
+pub const DeepSeekClient = @import("deepseek.zig").DeepSeekClient;
+pub const DeepSeekRequest = @import("deepseek.zig").DeepSeekRequest;
+pub const DeepSeekResponse = @import("deepseek.zig").DeepSeekResponse;
+pub const DeepSeekMessage = @import("deepseek.zig").DeepSeekMessage;
 
 /// LLM 提供商类型
 pub const LLMProvider = enum {
@@ -103,6 +109,7 @@ pub const LLMConfig = struct {
             .openai => "https://api.openai.com/v1",
             .anthropic => "https://api.anthropic.com",
             .groq => "https://api.groq.com/openai/v1",
+            .deepseek => "https://api.deepseek.com/v1",
             .ollama => "http://localhost:11434/v1",
             .custom => self.base_url orelse "",
         };
@@ -123,6 +130,13 @@ pub const LLMError = error{
     ApiError,
     UnsupportedProvider,
     ConfigurationError,
+    OutOfMemory,
+    NoChoicesInResponse,
+    HttpClientMissing,
+    AuthenticationError,
+    ApiKeyMissing,
+    RateLimitExceeded,
+    InvalidRequest,
 };
 
 /// LLM 使用统计
@@ -187,6 +201,7 @@ pub const LLM = struct {
     config: LLMConfig,
     http_client: ?*HttpClient,
     openai_client: ?OpenAIClient,
+    deepseek_client: ?DeepSeekClient,
 
     const Self = @This();
 
@@ -201,6 +216,7 @@ pub const LLM = struct {
             .config = config,
             .http_client = null,
             .openai_client = null,
+            .deepseek_client = null,
         };
         return llm;
     }
@@ -226,6 +242,16 @@ pub const LLM = struct {
                     );
                 }
             },
+            .deepseek => {
+                if (self.config.api_key) |api_key| {
+                    self.deepseek_client = DeepSeekClient.init(
+                        self.allocator,
+                        api_key,
+                        client,
+                        self.config.base_url,
+                    );
+                }
+            },
             else => {
                 // 其他提供商暂时不需要特殊客户端
             },
@@ -241,6 +267,7 @@ pub const LLM = struct {
         return switch (self.config.provider) {
             .openai, .groq => self.generateOpenAI(messages, options),
             .anthropic => self.generateAnthropic(messages, options),
+            .deepseek => self.generateDeepSeek(messages, options),
             .ollama => self.generateOllama(messages, options),
             .custom => self.generateCustom(messages, options),
         };
@@ -260,6 +287,7 @@ pub const LLM = struct {
         return switch (self.config.provider) {
             .openai, .groq => self.generateStreamOpenAI(messages, options, callback),
             .anthropic => self.generateStreamAnthropic(messages, options, callback),
+            .deepseek => self.generateStreamDeepSeek(messages, options, callback),
             .ollama => self.generateStreamOllama(messages, options, callback),
             .custom => self.generateStreamCustom(messages, options, callback),
         };
@@ -312,6 +340,59 @@ pub const LLM = struct {
         return result;
     }
 
+    /// DeepSeek API 生成实现
+    fn generateDeepSeek(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
+        if (self.deepseek_client == null) {
+            return LLMError.ConfigurationError;
+        }
+
+        const client = &self.deepseek_client.?;
+
+        // 转换消息格式
+        var deepseek_messages = std.ArrayList(DeepSeekMessage).init(self.allocator);
+        defer deepseek_messages.deinit();
+
+        for (messages) |msg| {
+            try deepseek_messages.append(.{
+                .role = msg.role,
+                .content = msg.content,
+            });
+        }
+
+        // 构建请求
+        const request = DeepSeekRequest{
+            .model = self.config.model,
+            .messages = deepseek_messages.items,
+            .temperature = if (options) |opts| opts.temperature else self.config.temperature,
+            .max_tokens = if (options) |opts| opts.max_tokens else self.config.max_tokens,
+            .stream = false,
+        };
+
+        // 发送请求
+        const response = client.chatCompletion(request) catch |err| {
+            return switch (err) {
+                else => LLMError.RequestFailed,
+            };
+        };
+
+        // 检查响应
+        if (response.choices.len == 0) {
+            return LLMError.NoChoicesInResponse;
+        }
+
+        const choice = response.choices[0];
+        var result = try GenerateResult.init(self.allocator, choice.message.content, response.model);
+
+        if (choice.finish_reason) |reason| {
+            result.finish_reason = try self.allocator.dupe(u8, reason);
+        }
+
+        result.usage = LLMUsage.init(response.usage.prompt_tokens, response.usage.completion_tokens);
+        result.created_at = @intCast(response.created);
+
+        return result;
+    }
+
     /// Anthropic Claude API 生成实现
     fn generateAnthropic(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
         _ = messages;
@@ -358,12 +439,63 @@ pub const LLM = struct {
         options: ?GenerateOptions,
         callback: *const fn (chunk: []const u8) void,
     ) LLMError!void {
-        _ = self;
-        _ = messages;
-        _ = options;
+        if (self.openai_client) |client| {
+            // 构建OpenAI请求
+            var openai_messages = std.ArrayList(OpenAIMessage).init(self.allocator);
+            defer openai_messages.deinit();
 
-        // TODO: 实现 OpenAI 流式 API 调用
-        callback("OpenAI streaming not implemented yet");
+            for (messages) |msg| {
+                try openai_messages.append(.{
+                    .role = msg.role,
+                    .content = msg.content,
+                });
+            }
+
+            const request = OpenAIRequest{
+                .model = self.config.model,
+                .messages = openai_messages.items,
+                .temperature = if (options) |opts| opts.temperature else self.config.temperature,
+                .max_tokens = if (options) |opts| opts.max_tokens else self.config.max_tokens,
+                .stream = true, // 启用流式响应
+            };
+
+            try client.streamCompletion(self.allocator, request, callback);
+        } else {
+            return LLMError.HttpClientMissing;
+        }
+    }
+
+    /// DeepSeek 流式生成实现
+    fn generateStreamDeepSeek(
+        self: *LLM,
+        messages: []const Message,
+        options: ?GenerateOptions,
+        callback: *const fn (chunk: []const u8) void,
+    ) LLMError!void {
+        if (self.deepseek_client) |*client| {
+            // 构建DeepSeek请求
+            var deepseek_messages = std.ArrayList(DeepSeekMessage).init(self.allocator);
+            defer deepseek_messages.deinit();
+
+            for (messages) |msg| {
+                try deepseek_messages.append(.{
+                    .role = msg.role,
+                    .content = msg.content,
+                });
+            }
+
+            const request = DeepSeekRequest{
+                .model = self.config.model,
+                .messages = deepseek_messages.items,
+                .temperature = if (options) |opts| opts.temperature else self.config.temperature,
+                .max_tokens = if (options) |opts| opts.max_tokens else self.config.max_tokens,
+                .stream = true, // 启用流式响应
+            };
+
+            try client.streamCompletion(self.allocator, request, callback);
+        } else {
+            return LLMError.HttpClientMissing;
+        }
     }
 
     /// Anthropic 流式生成实现

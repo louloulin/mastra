@@ -93,6 +93,7 @@ pub const Telemetry = struct {
 
         var span_iter = self.active_spans.iterator();
         while (span_iter.next()) |entry| {
+            // 清理值
             entry.value_ptr.deinit();
         }
         self.active_spans.deinit();

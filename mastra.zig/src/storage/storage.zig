@@ -53,7 +53,27 @@ pub const Storage = struct {
     }
 
     pub fn deinit(self: *Storage) void {
-        // JSON Values don't need explicit deinitialization in newer Zig versions
+        // 正确清理HashMap中的所有内存
+        var iter = self.data.iterator();
+        while (iter.next()) |entry| {
+            // 释放key字符串（由allocPrint分配）
+            self.allocator.free(entry.key_ptr.*);
+
+            // 释放JSON对象中的内存
+            if (entry.value_ptr.* == .object) {
+                var obj_iter = entry.value_ptr.object.iterator();
+                while (obj_iter.next()) |obj_entry| {
+                    if (obj_entry.value_ptr.* == .string) {
+                        // 只释放我们分配的字符串（id字符串）
+                        if (std.mem.eql(u8, obj_entry.key_ptr.*, "id")) {
+                            self.allocator.free(obj_entry.value_ptr.string);
+                        }
+                    }
+                }
+                entry.value_ptr.object.deinit();
+            }
+        }
+
         self.data.deinit();
         self.allocator.destroy(self);
     }

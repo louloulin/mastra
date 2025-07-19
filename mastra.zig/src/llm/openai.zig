@@ -24,6 +24,7 @@ pub const OpenAIError = error{
     InvalidRequest,
     AuthenticationError,
     NoChoicesInResponse,
+    OutOfMemory,
 };
 
 /// OpenAI 消息结构
@@ -299,5 +300,85 @@ pub const OpenAIClient = struct {
             }
         }
         self.allocator.free(messages);
+    }
+
+    /// 流式完成请求
+    pub fn streamCompletion(
+        self: *Self,
+        allocator: std.mem.Allocator,
+        request: OpenAIRequest,
+        callback: *const fn (chunk: []const u8) void,
+    ) OpenAIError!void {
+        // api_key是非可选类型，不需要检查null
+
+        // http_client是非可选类型，不需要检查null
+
+        // 序列化请求
+        const json_body = try std.json.stringifyAlloc(allocator, request, .{});
+        defer allocator.free(json_body);
+
+        // 准备头部
+        const auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{self.api_key});
+        defer allocator.free(auth_header);
+
+        const headers = [_]Header{
+            .{ .name = "Authorization", .value = auth_header },
+            .{ .name = "Content-Type", .value = "application/json" },
+            .{ .name = "Accept", .value = "text/event-stream" },
+        };
+
+        // 构建完整的URL
+        const url = try std.fmt.allocPrint(allocator, "{s}/chat/completions", .{self.base_url});
+        defer allocator.free(url);
+
+        // 发送流式请求
+        var response = self.http_client.request(.{
+            .method = .POST,
+            .url = url,
+            .headers = &headers,
+            .body = json_body,
+        }) catch |err| {
+            return switch (err) {
+                else => OpenAIError.RequestFailed,
+            };
+        };
+        defer response.deinit();
+
+        if (!response.isSuccess()) {
+            return OpenAIError.ApiError;
+        }
+
+        // 解析Server-Sent Events流
+        try self.parseSSEStream(response.body, callback);
+    }
+
+    /// 解析Server-Sent Events流
+    fn parseSSEStream(self: *Self, stream_data: []const u8, callback: *const fn (chunk: []const u8) void) !void {
+        var lines = std.mem.splitSequence(u8, stream_data, "\n");
+
+        while (lines.next()) |line| {
+            if (std.mem.startsWith(u8, line, "data: ")) {
+                const data = line[6..]; // 跳过"data: "
+
+                if (std.mem.eql(u8, data, "[DONE]")) {
+                    break;
+                }
+
+                // 解析JSON数据并提取内容
+                var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, data, .{}) catch continue;
+                defer parsed.deinit();
+
+                if (parsed.value.object.get("choices")) |choices| {
+                    if (choices.array.items.len > 0) {
+                        const choice = choices.array.items[0];
+                        if (choice.object.get("delta")) |delta| {
+                            if (delta.object.get("content")) |content| {
+                                callback(content.string);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 };

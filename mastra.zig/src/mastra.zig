@@ -24,6 +24,7 @@ pub const llm = @import("llm/llm.zig");
 pub const telemetry = @import("telemetry/telemetry.zig");
 pub const vector = @import("storage/vector.zig");
 pub const utils = @import("utils/logger.zig");
+pub const cache = @import("utils/cache.zig");
 
 // HTTP客户端和网络
 pub const http = @import("core/http.zig");
@@ -65,3 +66,13 @@ pub const VectorStoreConfig = vector.VectorStoreConfig;
 pub const VectorDocument = vector.VectorDocument;
 
 pub const Logger = utils.Logger;
+
+pub const LRUCache = cache.LRUCache;
+pub const CacheConfig = cache.CacheConfig;
+pub const CacheStats = cache.CacheStats;
+
+// DeepSeek API 支持
+pub const DeepSeekClient = llm.DeepSeekClient;
+pub const DeepSeekRequest = llm.DeepSeekRequest;
+pub const DeepSeekResponse = llm.DeepSeekResponse;
+pub const DeepSeekMessage = llm.DeepSeekMessage;

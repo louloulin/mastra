@@ -54,14 +54,14 @@ pub const MemoryMessage = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        // 简化内存清理，只释放我们确定分配的内存
         self.allocator.free(self.id);
         self.allocator.free(self.role);
         self.allocator.free(self.content);
         if (self.embedding) |embedding| {
             self.allocator.free(embedding);
         }
-        // JSON Value doesn't need explicit deinitialization in newer Zig versions
-        _ = self.metadata;
+        // metadata由JSON系统管理，不需要手动释放
     }
 
     pub fn clone(self: *const Self, allocator: std.mem.Allocator) !Self {
@@ -145,6 +145,11 @@ pub const Memory = struct {
         // 清理语义记忆
         var semantic_iter = self.semantic_memory.iterator();
         while (semantic_iter.next()) |entry| {
+            // 清理key字符串（如果是我们分配的）
+            // 注意：StringHashMap的key通常是外部提供的，不需要释放
+            // 但如果将来有dupe的key，需要在这里释放
+
+            // 清理值
             entry.value_ptr.deinit();
         }
         self.semantic_memory.deinit();

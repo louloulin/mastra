@@ -17,6 +17,13 @@ pub const HttpError = error{
     ConnectionFailed,
     TimeoutError,
     OutOfMemory,
+    ConnectionResetByPeer,
+    UnexpectedWriteFailure,
+    InvalidContentLength,
+    UnsupportedTransferEncoding,
+    NotWriteable,
+    MessageTooLong,
+    MessageNotCompleted,
 };
 
 /// HTTP方法
@@ -111,11 +118,28 @@ pub const Response = struct {
     }
 };
 
+/// 重试配置
+pub const RetryConfig = struct {
+    max_attempts: u32 = 3,
+    initial_delay_ms: u64 = 100,
+    max_delay_ms: u64 = 5000,
+    backoff_multiplier: f32 = 2.0,
+};
+
+/// 超时配置
+pub const TimeoutConfig = struct {
+    connect_timeout_ms: u64 = 5000,
+    request_timeout_ms: u64 = 30000,
+    read_timeout_ms: u64 = 30000,
+};
+
 /// HTTP客户端
 pub const HttpClient = struct {
     allocator: std.mem.Allocator,
     client: std.http.Client,
     event_loop: ?*EventLoop,
+    retry_config: RetryConfig,
+    timeout_config: TimeoutConfig,
 
     const Self = @This();
 
@@ -125,6 +149,19 @@ pub const HttpClient = struct {
             .allocator = allocator,
             .client = std.http.Client{ .allocator = allocator },
             .event_loop = event_loop,
+            .retry_config = RetryConfig{},
+            .timeout_config = TimeoutConfig{},
+        };
+    }
+
+    /// 初始化HTTP客户端（带配置）
+    pub fn initWithConfig(allocator: std.mem.Allocator, event_loop: ?*EventLoop, retry_config: RetryConfig, timeout_config: TimeoutConfig) Self {
+        return Self{
+            .allocator = allocator,
+            .client = std.http.Client{ .allocator = allocator },
+            .event_loop = event_loop,
+            .retry_config = retry_config,
+            .timeout_config = timeout_config,
         };
     }
 
@@ -160,11 +197,23 @@ pub const HttpClient = struct {
         }
 
         // 创建请求
+        const http_method = switch (config.method) {
+            .GET => std.http.Method.GET,
+            .POST => std.http.Method.POST,
+            .PUT => std.http.Method.PUT,
+            .DELETE => std.http.Method.DELETE,
+            .PATCH => std.http.Method.PATCH,
+            .HEAD => std.http.Method.HEAD,
+            .OPTIONS => std.http.Method.OPTIONS,
+        };
+
         var req = self.client.open(
-            @enumFromInt(@intFromEnum(config.method)),
+            http_method,
             uri,
-            headers.items,
-            .{},
+            .{
+                .server_header_buffer = undefined,
+                .extra_headers = headers.items,
+            },
         ) catch {
             return HttpError.RequestFailed;
         };
@@ -173,17 +222,28 @@ pub const HttpClient = struct {
         // 设置请求体
         if (config.body) |body| {
             req.transfer_encoding = .{ .content_length = body.len };
-            try req.send();
-            try req.writeAll(body);
+            req.send() catch {
+                return HttpError.RequestFailed;
+            };
+            req.writeAll(body) catch {
+                return HttpError.RequestFailed;
+            };
         } else {
-            try req.send();
+            req.send() catch {
+                return HttpError.RequestFailed;
+            };
         }
 
-        try req.finish();
-        try req.wait();
+        req.finish() catch {
+            return HttpError.RequestFailed;
+        };
+        req.wait() catch {
+            return HttpError.RequestFailed;
+        };
 
         // 读取响应
-        var response = Response.init(self.allocator, @intCast(req.response.status.phrase().len));
+        const phrase_len = if (req.response.status.phrase()) |phrase| phrase.len else 0;
+        var response = Response.init(self.allocator, @intCast(phrase_len));
 
         // 读取响应头
         var header_iter = req.response.iterateHeaders();
@@ -195,7 +255,9 @@ pub const HttpClient = struct {
         var body_list = std.ArrayList(u8).init(self.allocator);
         defer body_list.deinit();
 
-        try req.reader().readAllArrayList(&body_list, 10 * 1024 * 1024); // 10MB限制
+        req.reader().readAllArrayList(&body_list, 10 * 1024 * 1024) catch {
+            return HttpError.ResponseError;
+        }; // 10MB限制
         try response.setBody(body_list.items);
 
         return response;
@@ -237,6 +299,43 @@ pub const HttpClient = struct {
             .url = url,
             .headers = headers,
         });
+    }
+
+    /// 带重试机制的HTTP请求
+    pub fn requestWithRetry(self: *Self, config: RequestConfig) HttpError!Response {
+        var attempts: u32 = 0;
+        var delay_ms = self.retry_config.initial_delay_ms;
+
+        while (attempts < self.retry_config.max_attempts) {
+            const result = self.request(config);
+
+            if (result) |*response| {
+                // 检查是否需要重试（5xx错误或网络错误）
+                if (response.status_code >= 500 and response.status_code < 600) {
+                    response.deinit();
+                    attempts += 1;
+                    if (attempts < self.retry_config.max_attempts) {
+                        std.time.sleep(delay_ms * 1_000_000); // 转换为纳秒
+                        delay_ms = @min(@as(u64, @intFromFloat(@as(f32, @floatFromInt(delay_ms)) * self.retry_config.backoff_multiplier)), self.retry_config.max_delay_ms);
+                        continue;
+                    }
+                }
+                return response.*;
+            } else |err| switch (err) {
+                HttpError.TimeoutError, HttpError.ConnectionFailed, HttpError.RequestFailed => {
+                    attempts += 1;
+                    if (attempts < self.retry_config.max_attempts) {
+                        std.time.sleep(delay_ms * 1_000_000); // 转换为纳秒
+                        delay_ms = @min(@as(u64, @intFromFloat(@as(f32, @floatFromInt(delay_ms)) * self.retry_config.backoff_multiplier)), self.retry_config.max_delay_ms);
+                        continue;
+                    }
+                    return err;
+                },
+                else => return err,
+            }
+        }
+
+        return HttpError.RequestFailed;
     }
 };
 

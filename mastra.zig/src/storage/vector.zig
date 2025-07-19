@@ -1,5 +1,5 @@
 const std = @import("std");
-// 暂时禁用SQLite导入
+// 暂时禁用SQLite导入，等待修复编译问题
 // const SQLiteConnection = @import("sqlite.zig").SQLiteConnection;
 // const SQLiteValue = @import("sqlite.zig").SQLiteValue;
 // const SQLiteError = @import("sqlite.zig").SQLiteError;
@@ -50,7 +50,7 @@ pub const VectorStore = struct {
     allocator: std.mem.Allocator,
     config: VectorStoreConfig,
     documents: std.StringHashMap(VectorDocument),
-    // 暂时禁用SQLite
+    // 暂时禁用SQLite支持
     // sqlite_db: ?SQLiteConnection,
 
     pub fn init(allocator: std.mem.Allocator, config: VectorStoreConfig) !*VectorStore {
@@ -77,9 +77,15 @@ pub const VectorStore = struct {
     }
 
     pub fn deinit(self: *VectorStore) void {
+        // 简化内存清理，避免复杂的双重释放问题
         var iter = self.documents.iterator();
         while (iter.next()) |entry| {
-            self.allocator.free(entry.value_ptr.embedding);
+            // 只释放embedding数组（这是我们确定分配的）
+            const doc = entry.value_ptr.*;
+            self.allocator.free(doc.embedding);
+
+            // 释放key字符串（由upsert中的dupe分配）
+            self.allocator.free(entry.key_ptr.*);
         }
         self.documents.deinit();
 
@@ -96,8 +102,11 @@ pub const VectorStore = struct {
             const embedding_copy = try self.allocator.alloc(f32, doc.embedding.len);
             @memcpy(embedding_copy, doc.embedding);
 
+            // 复制id字符串以确保内存安全
+            const id_copy = try self.allocator.dupe(u8, doc.id);
+
             const document_copy = VectorDocument{
-                .id = doc.id,
+                .id = id_copy,
                 .content = doc.content,
                 .embedding = embedding_copy,
                 .metadata = doc.metadata,
@@ -105,11 +114,14 @@ pub const VectorStore = struct {
             };
 
             // Remove existing document if it exists
-            if (self.documents.getPtr(doc.id)) |existing| {
-                self.allocator.free(existing.embedding);
+            if (self.documents.fetchRemove(doc.id)) |kv| {
+                // 释放旧的key、embedding和id
+                self.allocator.free(kv.key);
+                self.allocator.free(kv.value.embedding);
+                // kv.value.id和kv.key是同一个字符串，不需要重复释放
             }
 
-            try self.documents.put(doc.id, document_copy);
+            try self.documents.put(id_copy, document_copy);
         }
     }
 
