@@ -60,9 +60,8 @@ pub const MemoryMessage = struct {
         if (self.embedding) |embedding| {
             self.allocator.free(embedding);
         }
-        if (self.metadata) |*metadata| {
-            metadata.deinit();
-        }
+        // JSON Value doesn't need explicit deinitialization in newer Zig versions
+        _ = self.metadata;
     }
 
     pub fn clone(self: *const Self, allocator: std.mem.Allocator) !Self {

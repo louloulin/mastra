@@ -29,10 +29,7 @@ pub const Span = struct {
     parent_id: ?[]const u8 = null,
 
     pub fn deinit(self: *Span) void {
-        var iter = self.attributes.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.deinit();
-        }
+        // JSON Values don't need explicit deinitialization in newer Zig versions
         self.attributes.deinit();
     }
 };
@@ -43,6 +40,7 @@ pub const Metric = struct {
     timestamp: i64,
     labels: std.StringHashMap([]const u8),
     metric_type: []const u8 = "counter",
+    allocator: std.mem.Allocator,
 
     pub fn deinit(self: *Metric) void {
         var iter = self.labels.iterator();
@@ -51,8 +49,6 @@ pub const Metric = struct {
         }
         self.labels.deinit();
     }
-
-    const allocator: std.mem.Allocator = undefined;
 };
 
 pub const Telemetry = struct {
@@ -113,7 +109,7 @@ pub const Telemetry = struct {
         defer self.mutex.unlock();
 
         const span_id = try std.fmt.allocPrint(self.allocator, "span_{d}", .{std.time.timestamp()});
-        
+
         var span_attributes = std.StringHashMap(std.json.Value).init(self.allocator);
         if (attributes) |attrs| {
             if (attrs == .object) {
@@ -138,7 +134,7 @@ pub const Telemetry = struct {
         return span_id;
     }
 
-    pub fn endSpan(self: *Telemetry, span_id: []const u8, status: ?[]const u8, attributes: ?std.json.Value) void {
+    pub fn endSpan(self: *Telemetry, span_id: []const u8, status: ?[]const u8, attributes: ?std.json.Value) !void {
         if (@intFromEnum(self.config.level) < @intFromEnum(TelemetryLevel.basic)) {
             return;
         }
@@ -152,7 +148,7 @@ pub const Telemetry = struct {
             if (status) |s| {
                 span.status = s;
             }
-            
+
             if (attributes) |attrs| {
                 if (attrs == .object) {
                     var iter = attrs.object.iterator();
@@ -220,7 +216,7 @@ pub const Telemetry = struct {
         defer self.mutex.unlock();
 
         self.logger.info("[{s}] {s}", .{ level, message });
-        
+
         if (fields) |fs| {
             if (fs == .object) {
                 var iter = fs.object.iterator();
@@ -248,7 +244,7 @@ pub const Telemetry = struct {
         defer self.mutex.unlock();
 
         self.logger.info("Flushing telemetry data", .{});
-        
+
         // In a real implementation, this would send data to telemetry backend
         // For now, just log summary
         self.logger.info("Flushed {d} spans and {d} metrics", .{ self.spans.items.len, self.metrics.items.len });

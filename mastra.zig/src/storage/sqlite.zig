@@ -25,6 +25,7 @@ pub const SQLiteError = error{
     InvalidColumnType,
     TransactionFailed,
     MigrationFailed,
+    OutOfMemory,
 };
 
 /// SQLite 数据类型
@@ -68,7 +69,7 @@ pub const SQLiteRow = struct {
             }
         }
         self.allocator.free(self.values);
-        
+
         for (self.column_names) |name| {
             self.allocator.free(name);
         }
@@ -179,7 +180,7 @@ pub const SQLiteConnection = struct {
 
         const column_count = c.sqlite3_column_count(stmt);
         var column_names = try self.allocator.alloc([]const u8, @intCast(column_count));
-        
+
         // 获取列名
         for (0..@intCast(column_count)) |i| {
             const name_ptr = c.sqlite3_column_name(stmt, @intCast(i));
@@ -202,7 +203,7 @@ pub const SQLiteConnection = struct {
             var row_values = try self.allocator.alloc(SQLiteValue, @intCast(column_count));
             for (0..@intCast(column_count)) |i| {
                 row_values[i] = SQLiteValue.fromSQLite(stmt, @intCast(i));
-                
+
                 // 复制字符串和 blob 数据
                 switch (row_values[i]) {
                     .text => |text| {
@@ -245,7 +246,7 @@ pub const SQLiteConnection = struct {
     /// 开始事务
     pub fn beginTransaction(self: *Self) SQLiteError!void {
         if (self.in_transaction) return;
-        
+
         var result = self.execute("BEGIN TRANSACTION", null) catch return SQLiteError.TransactionFailed;
         result.deinit();
         self.in_transaction = true;
@@ -254,7 +255,7 @@ pub const SQLiteConnection = struct {
     /// 提交事务
     pub fn commitTransaction(self: *Self) SQLiteError!void {
         if (!self.in_transaction) return;
-        
+
         var result = self.execute("COMMIT", null) catch return SQLiteError.TransactionFailed;
         result.deinit();
         self.in_transaction = false;
@@ -263,7 +264,7 @@ pub const SQLiteConnection = struct {
     /// 回滚事务
     pub fn rollbackTransaction(self: *Self) SQLiteError!void {
         if (!self.in_transaction) return;
-        
+
         var result = self.execute("ROLLBACK", null) catch return SQLiteError.TransactionFailed;
         result.deinit();
         self.in_transaction = false;

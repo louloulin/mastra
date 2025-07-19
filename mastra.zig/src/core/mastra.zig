@@ -14,6 +14,7 @@ const VectorStore = @import("../storage/vector.zig").VectorStore;
 const Memory = @import("../memory/memory.zig").Memory;
 const Telemetry = @import("../telemetry/telemetry.zig").Telemetry;
 const Logger = @import("../utils/logger.zig").Logger;
+const LogLevel = @import("../utils/logger.zig").LogLevel;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const HttpClient = @import("http.zig").HttpClient;
 
@@ -26,7 +27,7 @@ pub const Config = struct {
     /// HTTP客户端配置
     http_timeout_ms: u32 = 30000,
     /// 日志级别
-    log_level: Logger.Level = .info,
+    log_level: LogLevel = .info,
     /// 存储配置
     storage: ?*Storage = null,
     vector: ?*VectorStore = null,
@@ -59,13 +60,10 @@ pub const Mastra = struct {
 
         // 初始化日志器
         var logger = if (config.logger) |l| l else blk: {
-            const new_logger = try allocator.create(Logger);
-            new_logger.* = try Logger.init(allocator, .{ .level = config.log_level });
-            break :blk new_logger;
+            break :blk try Logger.init(allocator, .{ .level = config.log_level });
         };
         errdefer if (config.logger == null) {
             logger.deinit();
-            allocator.destroy(logger);
         };
 
         // 初始化事件循环
@@ -150,7 +148,6 @@ pub const Mastra = struct {
         // 清理日志器（如果是我们创建的）
         if (self.config.logger == null) {
             self.logger.deinit();
-            self.allocator.destroy(self.logger);
         }
     }
 

@@ -32,9 +32,8 @@ pub const StepResult = struct {
     completed_at: i64,
 
     pub fn deinit(self: *StepResult) void {
-        if (self.output) |*output| {
-            output.deinit();
-        }
+        // JSON Value doesn't need explicit deinitialization in newer Zig versions
+        _ = self;
     }
 };
 

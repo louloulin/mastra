@@ -13,6 +13,7 @@ pub const LLMProvider = enum {
     anthropic,
     groq,
     ollama,
+    deepseek,
     custom,
 
     pub fn fromString(str: []const u8) ?LLMProvider {
@@ -20,6 +21,7 @@ pub const LLMProvider = enum {
         if (std.mem.eql(u8, str, "anthropic")) return .anthropic;
         if (std.mem.eql(u8, str, "groq")) return .groq;
         if (std.mem.eql(u8, str, "ollama")) return .ollama;
+        if (std.mem.eql(u8, str, "deepseek")) return .deepseek;
         if (std.mem.eql(u8, str, "custom")) return .custom;
         return null;
     }
@@ -30,6 +32,7 @@ pub const LLMProvider = enum {
             .anthropic => "anthropic",
             .groq => "groq",
             .ollama => "ollama",
+            .deepseek => "deepseek",
             .custom => "custom",
         };
     }
@@ -57,7 +60,7 @@ pub const LLMConfig = struct {
 
         // 检查需要 API 密钥的提供商
         switch (self.provider) {
-            .openai, .anthropic, .groq => {
+            .openai, .anthropic, .groq, .deepseek => {
                 if (self.api_key == null) {
                     return error.ApiKeyRequired;
                 }

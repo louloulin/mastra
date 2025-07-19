@@ -42,36 +42,33 @@ pub const Storage = struct {
     pub fn init(allocator: std.mem.Allocator, config: StorageConfig) !*Storage {
         const storage = try allocator.create(Storage);
         const data = std.StringHashMap(std.json.Value).init(allocator);
-        
+
         storage.* = Storage{
             .allocator = allocator,
             .config = config,
             .data = data,
         };
-        
+
         return storage;
     }
 
     pub fn deinit(self: *Storage) void {
-        var iter = self.data.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.deinit();
-        }
+        // JSON Values don't need explicit deinitialization in newer Zig versions
         self.data.deinit();
         self.allocator.destroy(self);
     }
 
     pub fn create(self: *Storage, table: []const u8, data: std.json.Value) ![]const u8 {
         const id = try std.fmt.allocPrint(self.allocator, "{s}_{d}", .{ table, std.time.timestamp() });
-        
+
         var record = std.json.ObjectMap.init(self.allocator);
         try record.put("id", std.json.Value{ .string = id });
         try record.put("data", data);
         try record.put("created_at", std.json.Value{ .integer = @intCast(std.time.timestamp()) });
         try record.put("updated_at", std.json.Value{ .integer = @intCast(std.time.timestamp()) });
-        
+
         try self.data.put(id, std.json.Value{ .object = record });
-        
+
         return id;
     }
 
@@ -79,15 +76,15 @@ pub const Storage = struct {
         if (self.data.get(id)) |value| {
             if (value == .object) {
                 const obj = value.object;
-                
+
                 const record_id = obj.get("id") orelse return null;
                 const record_data = obj.get("data") orelse return null;
                 const created_at = obj.get("created_at") orelse return null;
                 const updated_at = obj.get("updated_at") orelse return null;
-                
+
                 return StorageRecord{
                     .id = record_id.string,
-                    .data = record_data.*,
+                    .data = record_data,
                     .created_at = created_at.integer,
                     .updated_at = updated_at.integer,
                 };
@@ -100,10 +97,10 @@ pub const Storage = struct {
         if (self.data.getPtr(id)) |existing| {
             if (existing.* == .object) {
                 var obj = &existing.*.object;
-                
+
                 try obj.put("data", data);
                 try obj.put("updated_at", std.json.Value{ .integer = @intCast(std.time.timestamp()) });
-                
+
                 return true;
             }
         }
@@ -123,12 +120,12 @@ pub const Storage = struct {
             if (std.mem.startsWith(u8, entry.key_ptr.*, table_name)) {
                 if (entry.value_ptr.* == .object) {
                     const obj = entry.value_ptr.*.object;
-                    
+
                     const record_id = obj.get("id") orelse continue;
                     const record_data = obj.get("data") orelse continue;
                     const created_at = obj.get("created_at") orelse continue;
                     const updated_at = obj.get("updated_at") orelse continue;
-                    
+
                     try results.append(StorageRecord{
                         .id = record_id.string,
                         .data = record_data.*,
@@ -141,9 +138,10 @@ pub const Storage = struct {
 
         // Apply limit and offset
         const start = query_config.offset orelse 0;
-        const end = if (query_config.limit) |limit| 
-            @min(start + limit, results.items.len) 
-            else results.items.len;
+        const end = if (query_config.limit) |limit|
+            @min(start + limit, results.items.len)
+        else
+            results.items.len;
 
         if (start >= results.items.len) {
             return &[_]StorageRecord{};

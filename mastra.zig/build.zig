@@ -20,6 +20,8 @@ pub fn build(b: *std.Build) void {
 
     // 链接系统库
     lib.linkLibC();
+    // 暂时移除SQLite依赖
+    // lib.linkSystemLibrary("sqlite3");
 
     b.installArtifact(lib);
 
@@ -35,6 +37,8 @@ pub fn build(b: *std.Build) void {
     // exe.root_module.addImport("zqlite", zqlite.module("zqlite"));
     // exe.root_module.addImport("zul", zul.module("zul"));
     exe.linkLibC();
+    // 暂时移除SQLite依赖
+    // exe.linkSystemLibrary("sqlite3");
 
     b.installArtifact(exe);
 
@@ -58,6 +62,8 @@ pub fn build(b: *std.Build) void {
     // unit_tests.root_module.addImport("zqlite", zqlite.module("zqlite"));
     // unit_tests.root_module.addImport("zul", zul.module("zul"));
     unit_tests.linkLibC();
+    // 暂时移除SQLite依赖
+    // unit_tests.linkSystemLibrary("sqlite3");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
@@ -77,7 +83,26 @@ pub fn build(b: *std.Build) void {
     const simple_test_step = b.step("test-simple", "Run simple tests");
     simple_test_step.dependOn(&run_simple_tests.step);
 
+    // 添加集成测试
+    const integration_tests = b.addTest(.{
+        .root_source_file = b.path("test/integration_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // 创建mastra模块
+    const mastra_module = b.createModule(.{
+        .root_source_file = b.path("src/mastra.zig"),
+    });
+    integration_tests.root_module.addImport("mastra", mastra_module);
+    integration_tests.linkLibC();
+
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
+    const integration_test_step = b.step("test-integration", "Run integration tests");
+    integration_test_step.dependOn(&run_integration_tests.step);
+
     const all_tests_step = b.step("test-all", "Run all tests");
     all_tests_step.dependOn(&run_unit_tests.step);
     all_tests_step.dependOn(&run_simple_tests.step);
+    all_tests_step.dependOn(&run_integration_tests.step);
 }

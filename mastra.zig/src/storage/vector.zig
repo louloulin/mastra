@@ -1,7 +1,8 @@
 const std = @import("std");
-const SQLiteConnection = @import("sqlite.zig").SQLiteConnection;
-const SQLiteValue = @import("sqlite.zig").SQLiteValue;
-const SQLiteError = @import("sqlite.zig").SQLiteError;
+// 暂时禁用SQLite导入
+// const SQLiteConnection = @import("sqlite.zig").SQLiteConnection;
+// const SQLiteValue = @import("sqlite.zig").SQLiteValue;
+// const SQLiteError = @import("sqlite.zig").SQLiteError;
 
 pub const VectorStoreType = enum {
     memory,
@@ -49,25 +50,27 @@ pub const VectorStore = struct {
     allocator: std.mem.Allocator,
     config: VectorStoreConfig,
     documents: std.StringHashMap(VectorDocument),
-    sqlite_db: ?SQLiteConnection,
+    // 暂时禁用SQLite
+    // sqlite_db: ?SQLiteConnection,
 
     pub fn init(allocator: std.mem.Allocator, config: VectorStoreConfig) !*VectorStore {
         const store = try allocator.create(VectorStore);
         const documents = std.StringHashMap(VectorDocument).init(allocator);
 
-        // 初始化 SQLite 连接（如果需要）
-        var sqlite_db: ?SQLiteConnection = null;
-        if (config.type == .sqlite) {
-            const db_path = config.database_path orelse "vectors.db";
-            sqlite_db = try SQLiteConnection.open(allocator, db_path);
-            try initializeSQLiteSchema(&sqlite_db.?);
-        }
+        // 暂时禁用SQLite功能
+        // var sqlite_db: ?SQLiteConnection = null;
+        // if (config.type == .sqlite) {
+        //     const db_path = config.database_path orelse "vectors.db";
+        //     sqlite_db = try SQLiteConnection.open(allocator, db_path);
+        //     try initializeSQLiteSchema(&sqlite_db.?);
+        // }
 
         store.* = VectorStore{
             .allocator = allocator,
             .config = config,
             .documents = documents,
-            .sqlite_db = sqlite_db,
+            // 暂时禁用SQLite
+            // .sqlite_db = sqlite_db,
         };
 
         return store;
@@ -80,9 +83,10 @@ pub const VectorStore = struct {
         }
         self.documents.deinit();
 
-        if (self.sqlite_db) |*db| {
-            db.close();
-        }
+        // 暂时禁用SQLite功能
+        // if (self.sqlite_db) |*db| {
+        //     db.close();
+        // }
 
         self.allocator.destroy(self);
     }
@@ -269,26 +273,27 @@ pub const VectorStore = struct {
     }
 };
 
-/// 初始化 SQLite 向量存储模式
-fn initializeSQLiteSchema(db: *SQLiteConnection) !void {
-    const create_table_sql =
-        \\CREATE TABLE IF NOT EXISTS vector_embeddings (
-        \\    id TEXT PRIMARY KEY,
-        \\    content TEXT NOT NULL,
-        \\    vector BLOB NOT NULL,
-        \\    dimension INTEGER NOT NULL,
-        \\    metadata TEXT,
-        \\    score REAL DEFAULT 0.0,
-        \\    created_at INTEGER NOT NULL
-        \\);
-        \\
-        \\CREATE INDEX IF NOT EXISTS idx_vector_embeddings_created_at
-        \\ON vector_embeddings(created_at);
-        \\
-        \\CREATE INDEX IF NOT EXISTS idx_vector_embeddings_dimension
-        \\ON vector_embeddings(dimension);
-    ;
-
-    var result = try db.execute(create_table_sql, null);
-    result.deinit();
-}
+// 暂时禁用SQLite功能
+// /// 初始化 SQLite 向量存储模式
+// fn initializeSQLiteSchema(db: *SQLiteConnection) !void {
+//     const create_table_sql =
+//         \\CREATE TABLE IF NOT EXISTS vector_embeddings (
+//         \\    id TEXT PRIMARY KEY,
+//         \\    content TEXT NOT NULL,
+//         \\    vector BLOB NOT NULL,
+//         \\    dimension INTEGER NOT NULL,
+//         \\    metadata TEXT,
+//         \\    score REAL DEFAULT 0.0,
+//         \\    created_at INTEGER NOT NULL
+//         \\);
+//         \\
+//         \\CREATE INDEX IF NOT EXISTS idx_vector_embeddings_created_at
+//         \\ON vector_embeddings(created_at);
+//         \\
+//         \\CREATE INDEX IF NOT EXISTS idx_vector_embeddings_dimension
+//         \\ON vector_embeddings(dimension);
+//     ;
+//
+//     var result = try db.execute(create_table_sql, null);
+//     result.deinit();
+// }
