@@ -11,7 +11,7 @@ dist/
 .dev/db/*
 
 .env
-
+.zig-cache
 **/tsconfig.tsbuildinfo
 
 .turbo

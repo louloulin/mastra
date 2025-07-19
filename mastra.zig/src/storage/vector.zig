@@ -1,7 +1,11 @@
 const std = @import("std");
+const SQLiteConnection = @import("sqlite.zig").SQLiteConnection;
+const SQLiteValue = @import("sqlite.zig").SQLiteValue;
+const SQLiteError = @import("sqlite.zig").SQLiteError;
 
 pub const VectorStoreType = enum {
     memory,
+    sqlite,
     pinecone,
     qdrant,
     weaviate,
@@ -16,6 +20,10 @@ pub const VectorStoreConfig = struct {
     index_name: ?[]const u8 = null,
     dimension: usize = 1536, // Default OpenAI embedding dimension
     metric: []const u8 = "cosine",
+    // SQLite 特定配置
+    database_path: ?[]const u8 = null,
+    similarity_threshold: f32 = 0.7,
+    max_results: usize = 10,
 };
 
 pub const VectorDocument = struct {
@@ -41,17 +49,27 @@ pub const VectorStore = struct {
     allocator: std.mem.Allocator,
     config: VectorStoreConfig,
     documents: std.StringHashMap(VectorDocument),
-    
+    sqlite_db: ?SQLiteConnection,
+
     pub fn init(allocator: std.mem.Allocator, config: VectorStoreConfig) !*VectorStore {
         const store = try allocator.create(VectorStore);
         const documents = std.StringHashMap(VectorDocument).init(allocator);
-        
+
+        // 初始化 SQLite 连接（如果需要）
+        var sqlite_db: ?SQLiteConnection = null;
+        if (config.type == .sqlite) {
+            const db_path = config.database_path orelse "vectors.db";
+            sqlite_db = try SQLiteConnection.open(allocator, db_path);
+            try initializeSQLiteSchema(&sqlite_db.?);
+        }
+
         store.* = VectorStore{
             .allocator = allocator,
             .config = config,
             .documents = documents,
+            .sqlite_db = sqlite_db,
         };
-        
+
         return store;
     }
 
@@ -61,6 +79,11 @@ pub const VectorStore = struct {
             self.allocator.free(entry.value_ptr.embedding);
         }
         self.documents.deinit();
+
+        if (self.sqlite_db) |*db| {
+            db.close();
+        }
+
         self.allocator.destroy(self);
     }
 
@@ -68,7 +91,7 @@ pub const VectorStore = struct {
         for (documents) |doc| {
             const embedding_copy = try self.allocator.alloc(f32, doc.embedding.len);
             @memcpy(embedding_copy, doc.embedding);
-            
+
             const document_copy = VectorDocument{
                 .id = doc.id,
                 .content = doc.content,
@@ -76,12 +99,12 @@ pub const VectorStore = struct {
                 .metadata = doc.metadata,
                 .score = doc.score,
             };
-            
+
             // Remove existing document if it exists
             if (self.documents.getPtr(doc.id)) |existing| {
                 self.allocator.free(existing.embedding);
             }
-            
+
             try self.documents.put(doc.id, document_copy);
         }
     }
@@ -102,7 +125,7 @@ pub const VectorStore = struct {
         while (iter.next()) |entry| {
             const doc = entry.value_ptr;
             const similarity = try self.calculateSimilarity(query.vector, doc.embedding);
-            
+
             if (similarity >= query.threshold) {
                 const doc_copy = VectorDocument{
                     .id = doc.id,
@@ -111,7 +134,7 @@ pub const VectorStore = struct {
                     .metadata = doc.metadata,
                     .score = similarity,
                 };
-                
+
                 try results.append(doc_copy);
             }
         }
@@ -126,7 +149,7 @@ pub const VectorStore = struct {
         // Return top results
         const limit = @min(query.limit, results.items.len);
         var final_results = try std.ArrayList(VectorDocument).initCapacity(self.allocator, limit);
-        
+
         for (results.items[0..limit]) |doc| {
             final_results.appendAssumeCapacity(doc);
         }
@@ -161,13 +184,13 @@ pub const VectorStore = struct {
                 .metadata = doc.metadata,
                 .score = doc.score,
             };
-            
+
             try results.append(doc_copy);
         }
 
         const actual_limit = limit orelse results.items.len;
         const final_limit = @min(actual_limit, results.items.len);
-        
+
         var final_results = try std.ArrayList(VectorDocument).initCapacity(self.allocator, final_limit);
         for (results.items[0..final_limit]) |doc| {
             final_results.appendAssumeCapacity(doc);
@@ -225,7 +248,7 @@ pub const VectorStore = struct {
 
     fn euclideanSimilarity(_: *VectorStore, vec1: []const f32, vec2: []const f32) !f32 {
         var distance: f32 = 0.0;
-        
+
         for (vec1, vec2) |v1, v2| {
             const diff = v1 - v2;
             distance += diff * diff;
@@ -237,7 +260,7 @@ pub const VectorStore = struct {
 
     fn dotProductSimilarity(_: *VectorStore, vec1: []const f32, vec2: []const f32) !f32 {
         var dot_product: f32 = 0.0;
-        
+
         for (vec1, vec2) |v1, v2| {
             dot_product += v1 * v2;
         }
@@ -245,3 +268,27 @@ pub const VectorStore = struct {
         return dot_product;
     }
 };
+
+/// 初始化 SQLite 向量存储模式
+fn initializeSQLiteSchema(db: *SQLiteConnection) !void {
+    const create_table_sql =
+        \\CREATE TABLE IF NOT EXISTS vector_embeddings (
+        \\    id TEXT PRIMARY KEY,
+        \\    content TEXT NOT NULL,
+        \\    vector BLOB NOT NULL,
+        \\    dimension INTEGER NOT NULL,
+        \\    metadata TEXT,
+        \\    score REAL DEFAULT 0.0,
+        \\    created_at INTEGER NOT NULL
+        \\);
+        \\
+        \\CREATE INDEX IF NOT EXISTS idx_vector_embeddings_created_at
+        \\ON vector_embeddings(created_at);
+        \\
+        \\CREATE INDEX IF NOT EXISTS idx_vector_embeddings_dimension
+        \\ON vector_embeddings(dimension);
+    ;
+
+    var result = try db.execute(create_table_sql, null);
+    result.deinit();
+}

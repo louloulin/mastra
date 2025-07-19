@@ -46,15 +46,15 @@ pub const WorkflowStep = struct {
 
     pub fn execute(self: *WorkflowStep, allocator: std.mem.Allocator, input: std.json.Value) !StepResult {
         self.status = .running;
-        
+
         const started_at = std.time.timestamp();
         var output: ?std.json.Value = null;
         var error_message: ?[]const u8 = null;
         var final_status = StepStatus.completed;
-        
+
         const result = self.execute_fn(allocator, input) catch |err| {
             final_status = .failed;
-            error = @errorName(err);
+            error_message = @errorName(err);
             return StepResult{
                 .step_id = self.config.id,
                 .status = final_status,
@@ -65,11 +65,11 @@ pub const WorkflowStep = struct {
                 .completed_at = std.time.timestamp(),
             };
         };
-        
+
         output = result;
         const completed_at = std.time.timestamp();
-        const execution_time_ms = @intCast((completed_at - started_at) * 1000);
-        
+        const execution_time_ms: u64 = @intCast((completed_at - started_at) * 1000);
+
         self.status = final_status;
         self.result = StepResult{
             .step_id = self.config.id,
@@ -80,7 +80,7 @@ pub const WorkflowStep = struct {
             .started_at = started_at,
             .completed_at = completed_at,
         };
-        
+
         return self.result.?;
     }
 };
@@ -103,14 +103,14 @@ pub const WorkflowRun = struct {
     started_at: i64,
     completed_at: ?i64 = null,
     results: std.StringHashMap(std.json.Value),
-    
+
     pub fn init(allocator: std.mem.Allocator, workflow_id: []const u8) !*WorkflowRun {
-        var run = try allocator.create(WorkflowRun);
-        var steps = std.StringHashMap(StepResult).init(allocator);
-        var results = std.StringHashMap(std.json.Value).init(allocator);
-        
+        const run = try allocator.create(WorkflowRun);
+        const steps = std.StringHashMap(StepResult).init(allocator);
+        const results = std.StringHashMap(std.json.Value).init(allocator);
+
         const run_id = try std.fmt.allocPrint(allocator, "{s}_{d}", .{ workflow_id, std.time.timestamp() });
-        
+
         run.* = WorkflowRun{
             .id = run_id,
             .workflow_id = workflow_id,
@@ -119,32 +119,32 @@ pub const WorkflowRun = struct {
             .started_at = std.time.timestamp(),
             .results = results,
         };
-        
+
         return run;
     }
-    
+
     pub fn deinit(self: *WorkflowRun) void {
         var step_iter = self.steps.iterator();
         while (step_iter.next()) |entry| {
             entry.value_ptr.deinit();
         }
         self.steps.deinit();
-        
+
         var result_iter = self.results.iterator();
         while (result_iter.next()) |entry| {
             entry.value_ptr.deinit();
         }
         self.results.deinit();
     }
-    
+
     pub fn getStepResult(self: *WorkflowRun, step_id: []const u8) ?StepResult {
         return self.steps.get(step_id);
     }
-    
+
     pub fn getResult(self: *WorkflowRun, step_id: []const u8) ?std.json.Value {
         return self.results.get(step_id);
     }
-    
+
     pub fn setStepResult(self: *WorkflowRun, step_id: []const u8, result: StepResult) !void {
         try self.steps.put(step_id, result);
         if (result.output) |output| {
@@ -158,30 +158,30 @@ pub const Workflow = struct {
     config: WorkflowConfig,
     steps: std.StringHashMap(WorkflowStep),
     logger: *Logger,
-    
+
     pub fn init(allocator: std.mem.Allocator, config: WorkflowConfig, logger: *Logger) !*Workflow {
-        var workflow = try allocator.create(Workflow);
-        var steps = std.StringHashMap(WorkflowStep).init(allocator);
-        
+        const workflow = try allocator.create(Workflow);
+        const steps = std.StringHashMap(WorkflowStep).init(allocator);
+
         workflow.* = Workflow{
             .allocator = allocator,
             .config = config,
             .steps = steps,
             .logger = logger,
         };
-        
+
         // Initialize steps
         for (config.steps) |step_config| {
-            var step = WorkflowStep{
+            const step = WorkflowStep{
                 .config = step_config,
                 .execute_fn = undefined, // Will be set by caller
             };
             try workflow.steps.put(step_config.id, step);
         }
-        
+
         return workflow;
     }
-    
+
     pub fn deinit(self: *Workflow) void {
         var iter = self.steps.iterator();
         while (iter.next()) |entry| {
@@ -192,7 +192,7 @@ pub const Workflow = struct {
         self.steps.deinit();
         self.allocator.destroy(self);
     }
-    
+
     pub fn setStepExecutor(self: *Workflow, step_id: []const u8, executor: *const fn (std.mem.Allocator, std.json.Value) anyerror!std.json.Value) bool {
         if (self.steps.getPtr(step_id)) |step| {
             step.execute_fn = executor;
@@ -200,19 +200,19 @@ pub const Workflow = struct {
         }
         return false;
     }
-    
+
     pub fn execute(self: *Workflow, input: std.json.Value) !*WorkflowRun {
         var run = try WorkflowRun.init(self.allocator, self.config.id);
         errdefer run.deinit();
-        
+
         run.status = .running;
         self.logger.info("Starting workflow: {s}", .{self.config.name});
-        
+
         // Execute steps in dependency order
         for (self.config.steps) |step_config| {
             if (self.steps.getPtr(step_config.id)) |step| {
                 self.logger.info("Executing step: {s}", .{step_config.name});
-                
+
                 // Check dependencies
                 if (step_config.depends_on) |deps| {
                     for (deps) |dep| {
@@ -233,38 +233,38 @@ pub const Workflow = struct {
                         }
                     }
                 }
-                
+
                 // Execute step
                 const result = try step.execute(self.allocator, input);
                 try run.setStepResult(step_config.id, result);
-                
+
                 if (result.status == .failed) {
                     run.status = .failed;
-                    self.logger.error("Step {s} failed: {s}", .{ step_config.name, result.error orelse "Unknown error" });
+                    self.logger.err("Step {s} failed: {s}", .{ step_config.name, result.error_message orelse "Unknown error" });
                     break;
                 }
             }
         }
-        
+
         if (run.status != .failed) {
             run.status = .completed;
             run.completed_at = std.time.timestamp();
         }
-        
+
         self.logger.info("Workflow {s} completed with status: {s}", .{ self.config.name, @tagName(run.status) });
         return run;
     }
-    
+
     pub fn getStep(self: *Workflow, step_id: []const u8) ?*const WorkflowStep {
         return self.steps.getPtr(step_id);
     }
-    
+
     pub fn getSteps(self: *Workflow) []const StepConfig {
         return self.config.steps;
     }
-    
+
     pub fn addStep(self: *Workflow, step_config: StepConfig, executor: *const fn (std.mem.Allocator, std.json.Value) anyerror!std.json.Value) !void {
-        var step = WorkflowStep{
+        const step = WorkflowStep{
             .config = step_config,
             .execute_fn = executor,
         };

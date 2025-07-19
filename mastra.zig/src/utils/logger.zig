@@ -18,7 +18,7 @@ pub const Logger = struct {
     mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, config: LoggerConfig) !*Logger {
-        var logger = try allocator.create(Logger);
+        const logger = try allocator.create(Logger);
         logger.* = Logger{
             .allocator = allocator,
             .config = config,
@@ -50,7 +50,7 @@ pub const Logger = struct {
     }
 
     pub fn err(self: *Logger, comptime format: []const u8, args: anytype) void {
-        if (@intFromEnum(self.config.level) <= @intFromEnum(LogLevel.error)) {
+        if (@intFromEnum(self.config.level) <= @intFromEnum(LogLevel.err)) {
             self.log("ERROR", format, args);
         }
     }
@@ -61,8 +61,7 @@ pub const Logger = struct {
 
         const timestamp = std.time.timestamp();
         const output = self.config.output orelse std.io.getStdOut().writer();
-        
+
         output.print("[{s}] [{d}] " ++ format ++ "\n", .{ level, timestamp } ++ args) catch {};
-    }
     }
 };

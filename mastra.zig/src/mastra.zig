@@ -1,6 +1,20 @@
+//! Mastra.zig - AI应用开发框架
+//!
+//! 基于Zig实现的高性能AI应用开发框架，支持：
+//! - 异步事件循环 (libxev)
+//! - LLM集成 (OpenAI, Anthropic等)
+//! - 工具系统和函数调用
+//! - 工作流引擎
+//! - 向量存储和相似度搜索
+//! - 内存管理和持久化
+
+const std = @import("std");
+
+// 核心模块
 pub const Mastra = @import("core/mastra.zig").Mastra;
 pub const Config = @import("core/mastra.zig").Config;
 
+// 子模块
 pub const agent = @import("agent/agent.zig");
 pub const workflow = @import("workflow/workflow.zig");
 pub const tools = @import("tools/tool.zig");
@@ -10,6 +24,10 @@ pub const llm = @import("llm/llm.zig");
 pub const telemetry = @import("telemetry/telemetry.zig");
 pub const vector = @import("storage/vector.zig");
 pub const utils = @import("utils/logger.zig");
+
+// HTTP客户端和网络
+pub const http = @import("core/http.zig");
+pub const EventLoop = @import("core/event_loop.zig").EventLoop;
 
 pub const Agent = agent.Agent;
 pub const AgentConfig = agent.AgentConfig;

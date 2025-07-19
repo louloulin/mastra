@@ -1,0 +1,27 @@
+.{
+    .name = .mastra,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0xac34669e550fe611,
+    .dependencies = .{
+        // 暂时使用基础实现，后续添加外部依赖
+        // .libxev = .{
+        //     .url = "https://github.com/mitchellh/libxev/archive/main.tar.gz",
+        //     .hash = "1220...", // 实际hash值
+        // },
+        // .zqlite = .{
+        //     .url = "https://github.com/karlseguin/zqlite.zig/archive/main.tar.gz",
+        //     .hash = "1220...",
+        // },
+        // .zul = .{
+        //     .url = "https://github.com/karlseguin/zul/archive/main.tar.gz",
+        //     .hash = "1220...",
+        // },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "test",
+    },
+}
