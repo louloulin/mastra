@@ -122,6 +122,56 @@ pub fn build(b: *std.Build) void {
     minimal_test_exe.linkLibC();
     b.installArtifact(minimal_test_exe);
 
+    // 添加完整Agent功能验证示例
+    const complete_agent_exe = b.addExecutable(.{
+        .name = "complete_agent_example",
+        .root_source_file = b.path("complete_agent_example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    complete_agent_exe.linkLibC();
+    b.installArtifact(complete_agent_exe);
+
+    // 添加逐步调试工具
+    const debug_agent_exe = b.addExecutable(.{
+        .name = "debug_agent_step_by_step",
+        .root_source_file = b.path("debug_agent_step_by_step.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    debug_agent_exe.linkLibC();
+    b.installArtifact(debug_agent_exe);
+
+    // 添加单次调用测试
+    const single_call_exe = b.addExecutable(.{
+        .name = "single_call_test",
+        .root_source_file = b.path("single_call_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    single_call_exe.linkLibC();
+    b.installArtifact(single_call_exe);
+
+    // 添加HTTP内存测试
+    const http_memory_exe = b.addExecutable(.{
+        .name = "http_memory_test",
+        .root_source_file = b.path("http_memory_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    http_memory_exe.linkLibC();
+    b.installArtifact(http_memory_exe);
+
+    // 添加DeepSeek专用测试
+    const deepseek_only_exe = b.addExecutable(.{
+        .name = "deepseek_only_test",
+        .root_source_file = b.path("deepseek_only_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    deepseek_only_exe.linkLibC();
+    b.installArtifact(deepseek_only_exe);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -186,6 +236,41 @@ pub fn build(b: *std.Build) void {
 
     const run_minimal_test_step = b.step("run-minimal-test", "Run minimal DeepSeek API test");
     run_minimal_test_step.dependOn(&run_minimal_test_cmd.step);
+
+    // 添加完整Agent示例运行步骤
+    const run_complete_agent_cmd = b.addRunArtifact(complete_agent_exe);
+    run_complete_agent_cmd.step.dependOn(b.getInstallStep());
+
+    const run_complete_agent_step = b.step("run-complete-agent", "Run complete Agent functionality example");
+    run_complete_agent_step.dependOn(&run_complete_agent_cmd.step);
+
+    // 添加调试工具运行步骤
+    const run_debug_agent_cmd = b.addRunArtifact(debug_agent_exe);
+    run_debug_agent_cmd.step.dependOn(b.getInstallStep());
+
+    const run_debug_agent_step = b.step("run-debug-agent", "Run step-by-step Agent debugging tool");
+    run_debug_agent_step.dependOn(&run_debug_agent_cmd.step);
+
+    // 添加单次调用测试运行步骤
+    const run_single_call_cmd = b.addRunArtifact(single_call_exe);
+    run_single_call_cmd.step.dependOn(b.getInstallStep());
+
+    const run_single_call_step = b.step("run-single-call", "Run single call test");
+    run_single_call_step.dependOn(&run_single_call_cmd.step);
+
+    // 添加HTTP内存测试运行步骤
+    const run_http_memory_cmd = b.addRunArtifact(http_memory_exe);
+    run_http_memory_cmd.step.dependOn(b.getInstallStep());
+
+    const run_http_memory_step = b.step("run-http-memory", "Run HTTP memory management test");
+    run_http_memory_step.dependOn(&run_http_memory_cmd.step);
+
+    // 添加DeepSeek专用测试运行步骤
+    const run_deepseek_only_cmd = b.addRunArtifact(deepseek_only_exe);
+    run_deepseek_only_cmd.step.dependOn(b.getInstallStep());
+
+    const run_deepseek_only_step = b.step("run-deepseek-only", "Run DeepSeek-only HTTP test");
+    run_deepseek_only_step.dependOn(&run_deepseek_only_cmd.step);
 
     const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/mastra.zig"),

@@ -27,9 +27,10 @@ pub const AgentResponse = struct {
     content: []const u8,
     usage: ?std.json.Value = null,
     metadata: ?std.json.Value = null,
+    allocator: std.mem.Allocator,
 
-    pub fn deinit(_: *AgentResponse) void {
-        // No owned memory to free in basic implementation
+    pub fn deinit(self: *AgentResponse) void {
+        self.allocator.free(self.content);
     }
 };
 
@@ -93,7 +94,8 @@ pub const Agent = struct {
             try formatted_messages.append(msg);
         }
 
-        const response = try self.model.generate(formatted_messages.items, null);
+        var response = try self.model.generate(formatted_messages.items, null);
+        // 注意：不要在这里调用defer response.deinit()，因为我们需要先复制内容
 
         if (self.memory) |memory| {
             for (messages) |msg| {
@@ -102,11 +104,26 @@ pub const Agent = struct {
             try memory.addMessage(.{ .role = "assistant", .content = response.content });
         }
 
+        // 调试：检查LLM响应内容
+        std.debug.print("Agent收到LLM响应长度: {d}\n", .{response.content.len});
+        std.debug.print("Agent收到LLM响应内容: {s}\n", .{response.content});
+
+        // 复制内容到AgentResponse，避免使用已释放的内存
+        const content_copy = try self.allocator.dupe(u8, response.content);
+
+        // 现在可以安全地释放GenerateResult的内存
+        response.deinit();
+
+        // 调试：检查复制后的内容
+        std.debug.print("Agent复制后内容长度: {d}\n", .{content_copy.len});
+        std.debug.print("Agent复制后内容: {s}\n", .{content_copy});
+
         // 转换GenerateResult为AgentResponse
         return AgentResponse{
-            .content = response.content,
+            .content = content_copy,
             .usage = null,
             .metadata = null,
+            .allocator = self.allocator,
         };
     }
 

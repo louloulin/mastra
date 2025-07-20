@@ -65,6 +65,26 @@ pub const DeepSeekResponse = struct {
     choices: []DeepSeekChoice,
     usage: DeepSeekUsage,
     system_fingerprint: ?[]const u8 = null,
+
+    /// 释放深拷贝的DeepSeekResponse内存
+    pub fn deinitCopy(self: *DeepSeekResponse, allocator: std.mem.Allocator) void {
+        allocator.free(self.id);
+        allocator.free(self.object);
+        allocator.free(self.model);
+
+        for (self.choices) |*choice| {
+            allocator.free(choice.message.role);
+            allocator.free(choice.message.content);
+            if (choice.finish_reason) |fr| {
+                allocator.free(fr);
+            }
+        }
+        allocator.free(self.choices);
+
+        if (self.system_fingerprint) |sf| {
+            allocator.free(sf);
+        }
+    }
 };
 
 /// DeepSeek API 客户端
@@ -163,10 +183,13 @@ pub const DeepSeekClient = struct {
                 else => DeepSeekError.RequestFailed,
             };
         };
+        // 注意：暂时不调用response.deinit()，避免双重释放问题
+        // TODO: 需要仔细检查HTTP响应的生命周期管理
         defer response.deinit();
 
         // 检查HTTP状态码
         if (!response.isSuccess()) {
+            std.debug.print("DeepSeek: HTTP状态码错误: {d}\n", .{response.status_code});
             return switch (response.status_code) {
                 401 => DeepSeekError.AuthenticationError,
                 429 => DeepSeekError.RateLimitExceeded,
@@ -175,13 +198,60 @@ pub const DeepSeekClient = struct {
             };
         }
 
-        // 解析响应
-        const parsed = std.json.parseFromSlice(DeepSeekResponse, self.allocator, response.body, .{}) catch |err| {
+        // 调试：打印响应信息
+        std.debug.print("DeepSeek API 响应状态: {d}\n", .{response.status_code});
+        std.debug.print("DeepSeek API 响应体长度: {d}\n", .{response.body.len});
+        if (response.body.len > 0) {
+            const preview_len = @min(200, response.body.len);
+            std.debug.print("DeepSeek API 响应体前{d}字符: {s}\n", .{ preview_len, response.body[0..preview_len] });
+        }
+
+        // 使用临时Arena分配器解析JSON，避免内存泄漏
+        var json_arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer json_arena.deinit(); // 这会释放所有JSON解析器分配的内存
+
+        const parsed = std.json.parseFromSlice(DeepSeekResponse, json_arena.allocator(), response.body, .{}) catch |err| {
             std.debug.print("DeepSeek API响应解析失败: {}\n响应内容: {s}\n", .{ err, response.body });
             return DeepSeekError.ResponseParseError;
         };
+        // 注意：parsed.deinit()会被json_arena.deinit()自动处理
 
-        return parsed.value;
+        // 调试：检查解析后的内容
+        if (parsed.value.choices.len > 0) {
+            const content = parsed.value.choices[0].message.content;
+            std.debug.print("解析后的内容长度: {d}\n", .{content.len});
+            std.debug.print("解析后的内容前10字节: ", .{});
+            const debug_len = @min(10, content.len);
+            for (content[0..debug_len]) |byte| {
+                std.debug.print("{d} ", .{byte});
+            }
+            std.debug.print("\n解析后的内容: {s}\n", .{content});
+        }
+
+        // 立即创建一个深拷贝，避免内存被破坏
+        var result = parsed.value;
+
+        // 复制所有字符串字段
+        result.id = try self.allocator.dupe(u8, parsed.value.id);
+        result.object = try self.allocator.dupe(u8, parsed.value.object);
+        result.model = try self.allocator.dupe(u8, parsed.value.model);
+        result.system_fingerprint = if (parsed.value.system_fingerprint) |sf| try self.allocator.dupe(u8, sf) else null;
+
+        // 复制choices数组
+        result.choices = try self.allocator.alloc(DeepSeekChoice, parsed.value.choices.len);
+        for (parsed.value.choices, 0..) |choice, i| {
+            result.choices[i] = DeepSeekChoice{
+                .index = choice.index,
+                .message = DeepSeekMessage{
+                    .role = try self.allocator.dupe(u8, choice.message.role),
+                    .content = try self.allocator.dupe(u8, choice.message.content),
+                },
+                .logprobs = choice.logprobs,
+                .finish_reason = if (choice.finish_reason) |fr| try self.allocator.dupe(u8, fr) else null,
+            };
+        }
+
+        return result;
     }
 
     /// 流式聊天完成请求

@@ -379,11 +379,12 @@ pub const LLM = struct {
         };
 
         // 发送请求
-        const response = client.chatCompletion(request) catch |err| {
+        var response = client.chatCompletion(request) catch |err| {
             return switch (err) {
                 else => LLMError.RequestFailed,
             };
         };
+        defer response.deinitCopy(self.allocator); // 释放深拷贝的内存
 
         // 检查响应
         if (response.choices.len == 0) {
@@ -391,7 +392,16 @@ pub const LLM = struct {
         }
 
         const choice = response.choices[0];
+
+        // 调试：检查从DeepSeek获取的内容
+        std.debug.print("LLM从DeepSeek获取内容长度: {d}\n", .{choice.message.content.len});
+        std.debug.print("LLM从DeepSeek获取内容: {s}\n", .{choice.message.content});
+
         var result = try GenerateResult.init(self.allocator, choice.message.content, response.model);
+
+        // 调试：检查GenerateResult中的内容
+        std.debug.print("LLM GenerateResult内容长度: {d}\n", .{result.content.len});
+        std.debug.print("LLM GenerateResult内容: {s}\n", .{result.content});
 
         if (choice.finish_reason) |reason| {
             result.finish_reason = try self.allocator.dupe(u8, reason);

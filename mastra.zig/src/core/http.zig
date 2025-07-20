@@ -99,7 +99,19 @@ pub const Response = struct {
     pub fn addHeader(self: *Self, name: []const u8, value: []const u8) !void {
         const name_copy = try self.allocator.dupe(u8, name);
         const value_copy = try self.allocator.dupe(u8, value);
-        try self.headers.put(name_copy, value_copy);
+
+        // 使用getOrPut来正确处理重复键的情况
+        const result = try self.headers.getOrPut(name_copy);
+        if (result.found_existing) {
+            // 如果键已存在，释放旧的键值对内存
+            self.allocator.free(result.key_ptr.*);
+            self.allocator.free(result.value_ptr.*);
+            // 释放新分配的name_copy，因为我们要重用旧的键
+            self.allocator.free(name_copy);
+            // 重新分配键
+            result.key_ptr.* = try self.allocator.dupe(u8, name);
+        }
+        result.value_ptr.* = value_copy;
     }
 
     pub fn setBody(self: *Self, body: []const u8) !void {
