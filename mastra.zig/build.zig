@@ -52,6 +52,16 @@ pub fn build(b: *std.Build) void {
     agent_test_exe.linkLibC();
     b.installArtifact(agent_test_exe);
 
+    // 添加并行工作流测试程序
+    const parallel_workflow_test_exe = b.addExecutable(.{
+        .name = "test_parallel_workflow",
+        .root_source_file = b.path("test_parallel_workflow.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    parallel_workflow_test_exe.linkLibC();
+    b.installArtifact(parallel_workflow_test_exe);
+
     // 添加DeepSeek直接测试程序
     const deepseek_direct_test_exe = b.addExecutable(.{
         .name = "test_deepseek_direct",

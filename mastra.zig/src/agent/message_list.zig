@@ -3,11 +3,11 @@ const Storage = @import("../storage/storage.zig").Storage;
 
 /// Message importance levels for smart trimming
 pub const MessageImportance = enum {
-    system,      // System messages (never trim)
-    critical,    // Critical messages (trim last)
-    important,   // Important messages
-    normal,      // Normal messages
-    low,         // Low importance messages (trim first)
+    system, // System messages (never trim)
+    critical, // Critical messages (trim last)
+    important, // Important messages
+    normal, // Normal messages
+    low, // Low importance messages (trim first)
 };
 
 /// Enhanced message structure for MessageList
@@ -30,7 +30,7 @@ pub const ListMessage = struct {
         importance: MessageImportance,
     ) !Self {
         const id = try std.fmt.allocPrint(allocator, "msg_{d}_{d}", .{ std.time.timestamp(), std.crypto.random.int(u32) });
-        
+
         return Self{
             .id = id,
             .role = try allocator.dupe(u8, role),
@@ -58,10 +58,10 @@ pub const ListMessage = struct {
 
 /// Configuration for MessageList behavior
 pub const MessageListConfig = struct {
-    max_context_length: usize = 4000,  // Maximum tokens in context
-    max_messages: usize = 100,         // Maximum number of messages to keep
+    max_context_length: usize = 4000, // Maximum tokens in context
+    max_messages: usize = 100, // Maximum number of messages to keep
     preserve_system_messages: bool = true,
-    preserve_recent_messages: usize = 5,  // Always keep N most recent messages
+    preserve_recent_messages: usize = 5, // Always keep N most recent messages
     enable_persistence: bool = false,
     thread_id: ?[]const u8 = null,
 };
@@ -79,7 +79,7 @@ pub const MessageList = struct {
 
     pub fn init(allocator: std.mem.Allocator, config: MessageListConfig, storage: ?*Storage) !*Self {
         const list = try allocator.create(Self);
-        
+
         list.* = Self{
             .allocator = allocator,
             .config = config,
@@ -102,18 +102,18 @@ pub const MessageList = struct {
             msg.deinit();
         }
         self.messages.deinit();
-        
+
         if (self.thread_id) |tid| {
             self.allocator.free(tid);
         }
-        
+
         self.allocator.destroy(self);
     }
 
     /// Add a message to the list
     pub fn addMessage(self: *Self, role: []const u8, content: []const u8, importance: MessageImportance) !void {
         var message = try ListMessage.init(self.allocator, role, content, importance);
-        
+
         try self.messages.append(message);
         if (message.token_count) |tokens| {
             self.total_tokens += tokens;
@@ -152,7 +152,8 @@ pub const MessageList = struct {
     /// Smart context trimming algorithm
     fn smartTrim(self: *Self, max_tokens: usize) ![]ListMessage {
         if (self.total_tokens <= max_tokens) {
-            return self.messages.items;
+            // Return a copy to ensure consistent memory management
+            return try self.allocator.dupe(ListMessage, self.messages.items);
         }
 
         var result = std.ArrayList(ListMessage).init(self.allocator);
@@ -174,14 +175,16 @@ pub const MessageList = struct {
         }
 
         // Include recent messages (working backwards)
-        const recent_start = if (messages.len > self.config.preserve_recent_messages) 
-            messages.len - self.config.preserve_recent_messages else 0;
-        
+        const recent_start = if (messages.len > self.config.preserve_recent_messages)
+            messages.len - self.config.preserve_recent_messages
+        else
+            0;
+
         var i = messages.len;
         while (i > recent_start and current_tokens < max_tokens) {
             i -= 1;
             const msg = messages[i];
-            
+
             // Skip if already included (system messages)
             if (msg.importance == .system and self.config.preserve_system_messages) {
                 continue;
@@ -197,11 +200,11 @@ pub const MessageList = struct {
         // Fill remaining space with important messages (by importance)
         if (current_tokens < max_tokens) {
             const importance_order = [_]MessageImportance{ .critical, .important, .normal, .low };
-            
+
             for (importance_order) |importance| {
                 for (messages) |msg| {
                     if (msg.importance != importance) continue;
-                    
+
                     // Skip if already included
                     var already_included = false;
                     for (result.items) |included| {
@@ -223,7 +226,7 @@ pub const MessageList = struct {
                             }
                             insert_pos = idx + 1;
                         }
-                        
+
                         try result.insert(insert_pos, msg);
                         current_tokens += msg_tokens;
                     }
@@ -292,7 +295,7 @@ pub const MessageList = struct {
         try msg_data.put("content", std.json.Value{ .string = message.content });
         try msg_data.put("timestamp", std.json.Value{ .integer = @intCast(message.timestamp) });
         try msg_data.put("importance", std.json.Value{ .string = @tagName(message.importance) });
-        
+
         if (message.token_count) |tokens| {
             try msg_data.put("token_count", std.json.Value{ .integer = @intCast(tokens) });
         }
@@ -319,7 +322,7 @@ pub const MessageList = struct {
 test "MessageList basic operations" {
     const allocator = std.testing.allocator;
     const config = MessageListConfig{};
-    
+
     var list = try MessageList.init(allocator, config, null);
     defer list.deinit();
 
@@ -333,7 +336,7 @@ test "MessageList basic operations" {
 test "MessageList smart trimming" {
     const allocator = std.testing.allocator;
     const config = MessageListConfig{ .max_context_length = 10 }; // Very small limit
-    
+
     var list = try MessageList.init(allocator, config, null);
     defer list.deinit();
 
