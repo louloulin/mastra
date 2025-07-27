@@ -1,19 +1,11 @@
 const std = @import("std");
 
 pub const ToolInput = struct {
-    name: []const u8,
-    description: []const u8,
-    required: bool = true,
-    type: []const u8 = "string",
+    data: std.json.Value,
 };
 
 pub const ToolOutput = struct {
-    content: []const u8,
-    metadata: ?std.json.Value = null,
-
-    pub fn deinit(_: *ToolOutput) void {
-        // No owned memory to free in basic implementation
-    }
+    data: std.json.Value,
 };
 
 pub const ToolSchema = struct {
