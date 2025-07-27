@@ -75,7 +75,7 @@ pub fn main() !void {
         .name = "智能助手Agent",
         .model = llm,
         .memory = null, // 暂时不使用内存系统，避免复杂的依赖
-        .instructions = "你是一个友好的AI助手，请用中文简洁地回答问题。",
+        .instructions = mastra.DynamicString.static("你是一个友好的AI助手，请用中文简洁地回答问题。"),
         .logger = logger,
     });
     defer agent.deinit(); // Agent的deinit会处理logger的释放

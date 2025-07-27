@@ -17,12 +17,7 @@ pub fn main() !void {
 
     // 1. 创建HTTP客户端
     std.debug.print("1. 创建HTTP客户端...\n", .{});
-    var http_client = mastra.http.HttpClient.initWithConfig(
-        allocator,
-        null,
-        .{ .max_attempts = 3, .initial_delay_ms = 1000 },
-        .{ .request_timeout_ms = 30000 }
-    );
+    var http_client = mastra.http.HttpClient.initWithConfig(allocator, null, .{ .max_attempts = 3, .initial_delay_ms = 1000 }, .{ .request_timeout_ms = 30000 });
     defer http_client.deinit();
     std.debug.print("   ✅ HTTP客户端创建成功\n", .{});
 
@@ -63,7 +58,7 @@ pub fn main() !void {
         .model = llm,
         .memory = null,
         .tools = null,
-        .instructions = "你是一个友好的AI助手，请用中文回答问题。回答要简洁明了，控制在100字以内。",
+        .instructions = mastra.DynamicString.static("你是一个友好的AI助手，请用中文回答问题。回答要简洁明了，控制在100字以内。"),
         .logger = null,
     };
 
@@ -74,7 +69,8 @@ pub fn main() !void {
     defer agent.deinit();
     std.debug.print("   ✅ Agent创建成功\n", .{});
     std.debug.print("   - 名称: {s}\n", .{agent.name});
-    std.debug.print("   - 指令: {s}\n", .{agent.instructions orelse "无"});
+    const resolved_instructions = try agent.instructions.resolve(agent.runtime_context);
+    std.debug.print("   - 指令: {s}\n", .{resolved_instructions});
 
     // 6. 准备测试消息
     std.debug.print("5. 准备测试消息...\n", .{});
@@ -88,7 +84,7 @@ pub fn main() !void {
     // 7. 调用Agent生成响应
     std.debug.print("6. 调用Agent生成响应...\n", .{});
     std.debug.print("   🔄 正在连接DeepSeek API...\n", .{});
-    
+
     const response = agent.generate(&[_]mastra.agent.Message{test_message}) catch |err| {
         std.debug.print("   ❌ Agent生成响应失败: {}\n", .{err});
         std.debug.print("\n🔍 可能的原因:\n", .{});
@@ -111,13 +107,13 @@ pub fn main() !void {
     // 9. 验证响应质量
     std.debug.print("\n🔍 响应质量分析:\n", .{});
     std.debug.print("   - 响应长度: {} 字符\n", .{response.content.len});
-    
+
     // 检查是否包含中文回答
     const has_chinese = std.mem.indexOf(u8, response.content, "你好") != null or
-                       std.mem.indexOf(u8, response.content, "您好") != null or
-                       std.mem.indexOf(u8, response.content, "助手") != null or
-                       std.mem.indexOf(u8, response.content, "我是") != null;
-    
+        std.mem.indexOf(u8, response.content, "您好") != null or
+        std.mem.indexOf(u8, response.content, "助手") != null or
+        std.mem.indexOf(u8, response.content, "我是") != null;
+
     if (has_chinese) {
         std.debug.print("   ✅ 包含中文回答\n", .{});
     } else {
@@ -138,9 +134,9 @@ pub fn main() !void {
         .content = "请用一句话总结一下人工智能的定义。",
         .metadata = null,
     };
-    
+
     std.debug.print("   📤 后续消息: {s}\n", .{follow_up_message.content});
-    
+
     const follow_up_response = agent.generate(&[_]mastra.agent.Message{follow_up_message}) catch |err| {
         std.debug.print("   ❌ 多轮对话失败: {}\n", .{err});
         std.debug.print("   ⚠️  多轮对话测试跳过\n", .{});

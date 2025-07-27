@@ -35,12 +35,36 @@ pub const AgentConfig = agent.AgentConfig;
 pub const Message = agent.Message;
 pub const AgentResponse = agent.AgentResponse;
 
+// Enhanced agent components
+pub const DynamicArgument = @import("agent/dynamic_argument.zig").DynamicArgument;
+pub const DynamicString = @import("agent/dynamic_argument.zig").DynamicString;
+pub const RuntimeContext = @import("agent/dynamic_argument.zig").RuntimeContext;
+pub const MessageList = @import("agent/message_list.zig").MessageList;
+pub const MessageListConfig = @import("agent/message_list.zig").MessageListConfig;
+pub const MessageImportance = @import("agent/message_list.zig").MessageImportance;
+pub const SaveQueueManager = @import("agent/save_queue_manager.zig").SaveQueueManager;
+pub const SaveQueueConfig = @import("agent/save_queue_manager.zig").SaveQueueConfig;
+pub const AgentGenerateOptions = @import("agent/agent_options.zig").AgentGenerateOptions;
+pub const AgentStreamOptions = @import("agent/agent_options.zig").AgentStreamOptions;
+pub const AgentGenerateResponse = @import("agent/agent_options.zig").AgentGenerateResponse;
+
 pub const Workflow = workflow.Workflow;
 pub const WorkflowConfig = workflow.WorkflowConfig;
 pub const WorkflowRun = workflow.WorkflowRun;
 pub const StepConfig = workflow.StepConfig;
 pub const StepStatus = workflow.StepStatus;
 pub const StepResult = workflow.StepResult;
+
+// Enhanced workflow components
+pub const ExecutionEngine = @import("workflow/execution_engine.zig").ExecutionEngine;
+pub const StepFlowEntry = @import("workflow/execution_engine.zig").StepFlowEntry;
+pub const StepFlowType = @import("workflow/execution_engine.zig").StepFlowType;
+pub const ConditionFunc = @import("workflow/execution_engine.zig").ConditionFunc;
+pub const LoopConfig = @import("workflow/execution_engine.zig").LoopConfig;
+pub const ForeachConfig = @import("workflow/execution_engine.zig").ForeachConfig;
+pub const ParallelExecutor = @import("workflow/parallel_executor.zig").ParallelExecutor;
+pub const ThreadPool = @import("workflow/parallel_executor.zig").ThreadPool;
+pub const ThreadPoolConfig = @import("workflow/parallel_executor.zig").ThreadPoolConfig;
 
 pub const Tool = tools.Tool;
 pub const ToolConfig = tools.ToolSchema;

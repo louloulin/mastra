@@ -29,7 +29,7 @@ pub fn main() !void {
         .max_tokens = 100, // 减少token数量
     });
     defer llm.deinit();
-    
+
     try llm.setHttpClient(http_client);
     std.debug.print("✅ LLM创建成功\n", .{});
 
@@ -44,7 +44,7 @@ pub fn main() !void {
         .name = "单次测试Agent",
         .model = llm,
         .memory = null,
-        .instructions = "请用中文简短回答。",
+        .instructions = mastra.DynamicString.static("请用中文简短回答。"),
         .logger = logger,
     });
     defer agent.deinit();
@@ -58,16 +58,16 @@ pub fn main() !void {
     };
 
     std.debug.print("📤 用户: {s}\n", .{test_message.content});
-    
+
     var response = agent.generate(&[_]mastra.agent.Message{test_message}) catch |err| {
         std.debug.print("❌ 调用失败: {}\n", .{err});
         return;
     };
     defer response.deinit();
-    
+
     std.debug.print("✅ 调用成功\n", .{});
     std.debug.print("📄 响应长度: {d} 字节\n", .{response.content.len});
-    
+
     // 检查响应内容的前几个字节
     if (response.content.len > 0) {
         std.debug.print("📄 响应前10字节: ", .{});
@@ -76,7 +76,7 @@ pub fn main() !void {
             std.debug.print("{d} ", .{byte});
         }
         std.debug.print("\n", .{});
-        
+
         // 尝试打印响应内容（可能有乱码）
         std.debug.print("📄 响应内容: {s}\n", .{response.content});
     }

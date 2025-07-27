@@ -2,6 +2,11 @@ const std = @import("std");
 const Logger = @import("../utils/logger.zig").Logger;
 const Agent = @import("../agent/agent.zig").Agent;
 
+// Import enhanced execution components
+const ExecutionEngine = @import("execution_engine.zig").ExecutionEngine;
+const StepFlowEntry = @import("execution_engine.zig").StepFlowEntry;
+const ThreadPoolConfig = @import("parallel_executor.zig").ThreadPoolConfig;
+
 pub const StepStatus = enum {
     pending,
     running,
@@ -92,6 +97,12 @@ pub const WorkflowConfig = struct {
     steps: []const StepConfig,
     triggers: ?std.json.Value = null,
     settings: ?std.json.Value = null,
+
+    // Enhanced execution configuration
+    enable_parallel_execution: bool = false,
+    thread_pool_config: ThreadPoolConfig = ThreadPoolConfig{},
+    max_concurrent_steps: ?usize = null,
+    execution_timeout_ms: ?u64 = null,
 };
 
 pub const WorkflowRun = struct {
@@ -156,16 +167,24 @@ pub const Workflow = struct {
     allocator: std.mem.Allocator,
     config: WorkflowConfig,
     steps: std.StringHashMap(WorkflowStep),
+    execution_engine: ?*ExecutionEngine,
     logger: *Logger,
 
     pub fn init(allocator: std.mem.Allocator, config: WorkflowConfig, logger: *Logger) !*Workflow {
         const workflow = try allocator.create(Workflow);
         const steps = std.StringHashMap(WorkflowStep).init(allocator);
 
+        // Initialize execution engine if parallel execution is enabled
+        var execution_engine: ?*ExecutionEngine = null;
+        if (config.enable_parallel_execution) {
+            execution_engine = try ExecutionEngine.init(allocator, config.thread_pool_config, logger);
+        }
+
         workflow.* = Workflow{
             .allocator = allocator,
             .config = config,
             .steps = steps,
+            .execution_engine = execution_engine,
             .logger = logger,
         };
 
@@ -189,6 +208,12 @@ pub const Workflow = struct {
             }
         }
         self.steps.deinit();
+
+        // Clean up execution engine
+        if (self.execution_engine) |engine| {
+            engine.deinit();
+        }
+
         self.allocator.destroy(self);
     }
 
@@ -260,6 +285,89 @@ pub const Workflow = struct {
 
     pub fn getSteps(self: *Workflow) []const StepConfig {
         return self.config.steps;
+    }
+
+    /// Execute workflow with parallel execution if enabled
+    pub fn executeParallel(self: *Workflow, input: std.json.Value) !*WorkflowRun {
+        if (self.execution_engine == null) {
+            // Fall back to sequential execution
+            return self.execute(input);
+        }
+
+        var run = try WorkflowRun.init(self.allocator, self.config.id);
+        errdefer run.deinit();
+
+        run.status = .running;
+        self.logger.info("Starting parallel workflow: {s}", .{self.config.name});
+
+        // Collect steps that can be executed in parallel (no dependencies)
+        var parallel_steps = std.ArrayList(StepConfig).init(self.allocator);
+        defer parallel_steps.deinit();
+
+        var parallel_fns = std.ArrayList(*const fn (std.mem.Allocator, std.json.Value) anyerror!std.json.Value).init(self.allocator);
+        defer parallel_fns.deinit();
+
+        for (self.config.steps) |step_config| {
+            if (step_config.depends_on == null or step_config.depends_on.?.len == 0) {
+                if (self.steps.getPtr(step_config.id)) |step| {
+                    try parallel_steps.append(step_config);
+                    try parallel_fns.append(step.execute_fn);
+                }
+            }
+        }
+
+        if (parallel_steps.items.len > 0) {
+            // Create inputs array
+            const inputs = try self.allocator.alloc(std.json.Value, parallel_steps.items.len);
+            defer self.allocator.free(inputs);
+
+            for (inputs) |*inp| {
+                inp.* = input;
+            }
+
+            // Execute in parallel
+            const results = self.execution_engine.?.parallel_executor.executeParallel(
+                parallel_steps.items,
+                parallel_fns.items,
+                inputs,
+            ) catch |err| {
+                run.status = .failed;
+                self.logger.err("Parallel execution failed: {}", .{err});
+                return run;
+            };
+            defer self.allocator.free(results);
+
+            // Store results
+            for (results) |result| {
+                try run.setStepResult(result.step_id, result);
+                if (result.status == .failed) {
+                    run.status = .failed;
+                    break;
+                }
+            }
+        }
+
+        if (run.status != .failed) {
+            run.status = .completed;
+            run.completed_at = std.time.timestamp();
+        }
+
+        self.logger.info("Parallel workflow {s} completed with status: {s}", .{ self.config.name, @tagName(run.status) });
+        return run;
+    }
+
+    /// Execute a step flow entry using the execution engine
+    pub fn executeStepFlow(self: *Workflow, flow: StepFlowEntry, input: std.json.Value) ![]StepResult {
+        if (self.execution_engine == null) {
+            return error.ExecutionEngineNotAvailable;
+        }
+
+        return try self.execution_engine.?.executeStepFlow(flow, input);
+    }
+
+    /// Check if parallel execution is enabled
+    pub fn isParallelExecutionEnabled(self: *Workflow) bool {
+        return self.execution_engine != null;
     }
 
     pub fn addStep(self: *Workflow, step_config: StepConfig, executor: *const fn (std.mem.Allocator, std.json.Value) anyerror!std.json.Value) !void {
