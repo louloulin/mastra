@@ -28,6 +28,9 @@ pub const events = @import("events/event.zig");
 pub const event_bus = @import("events/event_bus.zig");
 pub const streaming = @import("streaming/stream.zig");
 pub const response_stream = @import("streaming/response_stream.zig");
+pub const graph_rag = @import("rag/graph_rag.zig");
+pub const evaluator = @import("evaluation/evaluator.zig");
+pub const integration = @import("integration/auth.zig");
 pub const postgresql = @import("storage/postgresql.zig");
 pub const mongodb = @import("storage/mongodb.zig");
 pub const memory = @import("memory/memory.zig");
@@ -110,6 +113,22 @@ pub const StreamChunk = streaming.StreamChunk;
 pub const ResponseStream = response_stream.ResponseStream;
 pub const SSEEvent = response_stream.SSEEvent;
 pub const WebSocketMessage = response_stream.WebSocketMessage;
+
+// Graph RAG exports
+pub const GraphRAG = graph_rag.GraphRAG;
+pub const KnowledgeGraph = graph_rag.KnowledgeGraph;
+pub const Entity = graph_rag.Entity;
+pub const Relationship = graph_rag.Relationship;
+
+// Evaluation exports
+pub const EvaluationSession = evaluator.EvaluationSession;
+pub const EvaluationResult = evaluator.EvaluationResult;
+pub const TestCase = evaluator.TestCase;
+
+// Integration exports
+pub const AuthProvider = integration.AuthProvider;
+pub const ServiceRegistry = integration.ServiceRegistry;
+pub const IntegrationManager = integration.IntegrationManager;
 
 pub const Storage = storage.Storage;
 pub const StorageConfig = storage.StorageConfig;
