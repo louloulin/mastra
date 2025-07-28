@@ -128,12 +128,14 @@ pub const VectorSimilarity = struct {
 
 /// Search result
 pub const SearchResult = struct {
-    chunk: document.DocumentChunk,
+    chunk: *const document.DocumentChunk, // 改为指针，不拥有内存
     score: f32,
     rank: usize,
 
     pub fn deinit(self: *SearchResult, allocator: std.mem.Allocator) void {
-        self.chunk.deinit(allocator);
+        // 不释放chunk，因为它是借用的
+        _ = self;
+        _ = allocator;
     }
 };
 
@@ -202,7 +204,7 @@ pub const VectorStore = struct {
         defer results.deinit();
 
         // Calculate similarity scores for all chunks
-        for (self.chunks.items, 0..) |chunk, i| {
+        for (self.chunks.items, 0..) |*chunk, i| {
             if (chunk.embedding) |embedding| {
                 const score = switch (config.similarity_metric) {
                     .cosine => VectorSimilarity.cosineSimilarity(query_embedding, embedding),
@@ -212,7 +214,7 @@ pub const VectorStore = struct {
 
                 if (score >= config.min_score) {
                     try results.append(SearchResult{
-                        .chunk = chunk,
+                        .chunk = chunk.*, // 复制chunk而不是借用
                         .score = score,
                         .rank = i,
                     });

@@ -108,5 +108,7 @@ fn testRAGSystem(allocator: std.mem.Allocator) !void {
         std.debug.print("   🔍 结果 {}: 相似度 {d:.3}, 内容: {s}...\n", .{ i + 1, result.score, preview });
     }
 
+    // 注意：不要调用 result.deinit()，因为 chunk 是从 vector_store 借用的
+
     std.debug.print("   ✅ RAG系统基础功能验证完成\n", .{});
 }
