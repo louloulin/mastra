@@ -21,6 +21,13 @@ pub const tools = @import("tools/tool.zig");
 pub const tool_builder = @import("tools/tool_builder.zig");
 pub const mcp = @import("tools/mcp.zig");
 pub const storage = @import("storage/storage.zig");
+pub const rag = @import("rag/rag.zig");
+pub const document = @import("rag/document.zig");
+pub const embeddings = @import("rag/embeddings.zig");
+pub const events = @import("events/event.zig");
+pub const event_bus = @import("events/event_bus.zig");
+pub const streaming = @import("streaming/stream.zig");
+pub const response_stream = @import("streaming/response_stream.zig");
 pub const postgresql = @import("storage/postgresql.zig");
 pub const mongodb = @import("storage/mongodb.zig");
 pub const memory = @import("memory/memory.zig");
@@ -78,6 +85,31 @@ pub const ToolBuilder = tool_builder.ToolBuilder;
 pub const ToolRegistry = tool_builder.ToolRegistry;
 pub const DynamicToolDefinition = tool_builder.DynamicToolDefinition;
 pub const MCPServer = mcp.MCPServer;
+
+// RAG System exports
+pub const RAGSystem = rag.RAGSystem;
+pub const RAGConfig = rag.RAGConfig;
+pub const RAGContext = rag.RAGContext;
+pub const DocumentProcessor = document.DocumentProcessor;
+pub const DocumentType = document.DocumentType;
+pub const DocumentChunk = document.DocumentChunk;
+pub const EmbeddingProvider = embeddings.EmbeddingProvider;
+pub const RAGVectorStore = embeddings.VectorStore;
+pub const SearchResult = embeddings.SearchResult;
+
+// Event System exports
+pub const Event = events.Event;
+pub const EventBus = event_bus.EventBus;
+pub const EventSubscription = events.EventSubscription;
+pub const EventHandler = events.EventHandler;
+pub const EventPriority = events.EventPriority;
+
+// Streaming exports
+pub const Stream = streaming.Stream;
+pub const StreamChunk = streaming.StreamChunk;
+pub const ResponseStream = response_stream.ResponseStream;
+pub const SSEEvent = response_stream.SSEEvent;
+pub const WebSocketMessage = response_stream.WebSocketMessage;
 
 pub const Storage = storage.Storage;
 pub const StorageConfig = storage.StorageConfig;
