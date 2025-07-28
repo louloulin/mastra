@@ -13,7 +13,7 @@ dist/
 .env
 .zig-cache
 **/tsconfig.tsbuildinfo
-
+*zig-out*
 .turbo
 
 openapi-ts-error*

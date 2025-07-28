@@ -261,7 +261,7 @@ pub const ExecutionEngine = struct {
     }
 
     /// Execute a single step
-    fn executeStep(self: *Self, flow: StepFlowEntry, input: std.json.Value) ![]StepResult {
+    pub fn executeStep(self: *Self, flow: StepFlowEntry, input: std.json.Value) ![]StepResult {
         if (flow.step_config == null or flow.execute_fn == null) {
             return error.InvalidStepFlow;
         }

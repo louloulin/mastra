@@ -3,9 +3,8 @@ const Logger = @import("../utils/logger.zig").Logger;
 const Agent = @import("../agent/agent.zig").Agent;
 
 // Import enhanced execution components
-const ExecutionEngine = @import("execution_engine.zig").ExecutionEngine;
-const StepFlowEntry = @import("execution_engine.zig").StepFlowEntry;
-const ThreadPoolConfig = @import("parallel_executor.zig").ThreadPoolConfig;
+pub const StepFlowEntry = @import("execution_engine.zig").StepFlowEntry;
+pub const ThreadPoolConfig = @import("parallel_executor.zig").ThreadPoolConfig;
 
 pub const StepStatus = enum {
     pending,
@@ -378,3 +377,8 @@ pub const Workflow = struct {
         try self.steps.put(step_config.id, step);
     }
 };
+
+// Export parallel execution components
+pub const ThreadPool = @import("parallel_executor.zig").ThreadPool;
+pub const ParallelExecutor = @import("parallel_executor.zig").ParallelExecutor;
+pub const ExecutionEngine = @import("execution_engine.zig").ExecutionEngine;

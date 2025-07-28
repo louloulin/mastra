@@ -153,6 +153,8 @@ pub const VectorStoreConfig = vector.VectorStoreConfig;
 pub const VectorDocument = vector.VectorDocument;
 
 pub const Logger = utils.Logger;
+pub const LoggerConfig = utils.LoggerConfig;
+pub const LogLevel = utils.LogLevel;
 
 pub const LRUCache = cache.LRUCache;
 pub const CacheConfig = cache.CacheConfig;
