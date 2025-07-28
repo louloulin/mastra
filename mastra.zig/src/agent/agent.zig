@@ -5,18 +5,18 @@ const Tool = @import("../tools/tool.zig").Tool;
 const LLM = @import("../llm/llm.zig").LLM;
 const Storage = @import("../storage/storage.zig").Storage;
 
-// Import new components
-const DynamicArgument = @import("dynamic_argument.zig").DynamicArgument;
-const DynamicString = @import("dynamic_argument.zig").DynamicString;
-const RuntimeContext = @import("dynamic_argument.zig").RuntimeContext;
-const MessageList = @import("message_list.zig").MessageList;
-const MessageListConfig = @import("message_list.zig").MessageListConfig;
-const MessageImportance = @import("message_list.zig").MessageImportance;
-const SaveQueueManager = @import("save_queue_manager.zig").SaveQueueManager;
-const SaveQueueConfig = @import("save_queue_manager.zig").SaveQueueConfig;
-const AgentGenerateOptions = @import("agent_options.zig").AgentGenerateOptions;
-const AgentStreamOptions = @import("agent_options.zig").AgentStreamOptions;
-const AgentGenerateResponse = @import("agent_options.zig").AgentGenerateResponse;
+// Import and export new components
+pub const DynamicArgument = @import("dynamic_argument.zig").DynamicArgument;
+pub const DynamicString = @import("dynamic_argument.zig").DynamicString;
+pub const RuntimeContext = @import("dynamic_argument.zig").RuntimeContext;
+pub const MessageList = @import("message_list.zig").MessageList;
+pub const MessageListConfig = @import("message_list.zig").MessageListConfig;
+pub const MessageImportance = @import("message_list.zig").MessageImportance;
+pub const SaveQueueManager = @import("save_queue_manager.zig").SaveQueueManager;
+pub const SaveQueueConfig = @import("save_queue_manager.zig").SaveQueueConfig;
+pub const AgentGenerateOptions = @import("agent_options.zig").AgentGenerateOptions;
+pub const AgentStreamOptions = @import("agent_options.zig").AgentStreamOptions;
+pub const AgentGenerateResponse = @import("agent_options.zig").AgentGenerateResponse;
 
 /// Enhanced agent configuration with dynamic arguments and advanced features
 pub const AgentConfig = struct {

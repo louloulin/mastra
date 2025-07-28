@@ -58,15 +58,13 @@ pub const RAGSystem = struct {
     pub fn addDocument(self: *Self, content: []const u8, doc_type: document.DocumentType, metadata: document.DocumentMetadata) !void {
         // Process document into chunks
         const chunks = try self.document_processor.processDocument(content, doc_type, metadata);
+        defer self.allocator.free(chunks); // Always free the chunks array
 
         // Generate embeddings for chunks
         try self.embedding_provider.embedDocumentChunks(chunks);
 
-        // Add chunks to vector store (vector store takes ownership)
+        // Add chunks to vector store (vector store takes ownership of individual chunks)
         try self.vector_store.addChunks(chunks);
-
-        // Free the chunks array but not the individual chunks (vector store owns them now)
-        self.allocator.free(chunks);
 
         std.log.info("Added document {s} with {d} chunks", .{ metadata.id, chunks.len });
     }

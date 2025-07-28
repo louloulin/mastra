@@ -338,14 +338,27 @@ pub const DocumentProcessor = struct {
             try chunks.append(chunk);
 
             // Move to next chunk with overlap
-            if (actual_end > self.config.chunk_overlap) {
-                start = actual_end - self.config.chunk_overlap;
+            if (actual_end >= text.len) break;
+
+            const next_start = if (actual_end > self.config.chunk_overlap)
+                actual_end - self.config.chunk_overlap
+            else
+                actual_end;
+
+            // Ensure we make progress to avoid infinite loop
+            if (next_start <= start) {
+                start = start + 1;
             } else {
-                start = actual_end;
+                start = next_start;
             }
-            if (start >= actual_end) break;
 
             chunk_index += 1;
+
+            // Safety check to prevent infinite loops
+            if (chunk_index > 1000) {
+                std.log.warn("Too many chunks generated, stopping at {d}", .{chunk_index});
+                break;
+            }
         }
 
         return try chunks.toOwnedSlice();
