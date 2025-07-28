@@ -331,7 +331,16 @@ pub const ExecutionEngine = struct {
             try self.context.setStepResult(result.step_id, result);
         }
 
-        return results;
+        // Create a copy of results for return (caller will manage this memory)
+        const result_copy = try self.allocator.alloc(StepResult, results.len);
+        for (results, result_copy) |src, *dst| {
+            dst.* = src;
+        }
+
+        // Free the original results array from parallel executor
+        self.allocator.free(results);
+
+        return result_copy;
     }
 
     /// Execute conditional steps

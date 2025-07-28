@@ -79,11 +79,14 @@ pub const ThreadPool = struct {
     pub fn init(allocator: std.mem.Allocator, config: ThreadPoolConfig, logger: *Logger) !*Self {
         const pool = try allocator.create(Self);
 
+        var task_queue = std.fifo.LinearFifo(*StepTask, .Dynamic).init(allocator);
+        try task_queue.ensureTotalCapacity(config.queue_size);
+
         pool.* = Self{
             .allocator = allocator,
             .config = config,
             .threads = try allocator.alloc(std.Thread, config.max_threads),
-            .task_queue = std.fifo.LinearFifo(*StepTask, .Dynamic).init(allocator),
+            .task_queue = task_queue,
             .mutex = std.Thread.Mutex{},
             .condition = std.Thread.Condition{},
             .running = std.atomic.Value(bool).init(true),
@@ -133,29 +136,42 @@ pub const ThreadPool = struct {
         }
 
         try self.task_queue.writeItem(task);
+        self.logger.info("Task submitted to queue, queue size: {}", .{self.task_queue.readableLength()});
         self.condition.signal();
     }
 
     /// Submit multiple tasks as a batch
     pub fn submitBatch(self: *Self, tasks: []*StepTask) !void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-
-        if (self.task_queue.writableLength() < tasks.len) {
-            return error.QueueFull;
-        }
-
         for (tasks) |task| {
-            try self.task_queue.writeItem(task);
+            try self.submitTask(task);
         }
-
-        self.condition.broadcast();
     }
 
     /// Wait for all active tasks to complete
     pub fn waitAll(self: *Self) void {
-        while (self.active_tasks.load(.acquire) > 0) {
-            std.time.sleep(1 * std.time.ns_per_ms);
+        while (true) {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            const queue_empty = self.task_queue.readableLength() == 0;
+            const no_active_tasks = self.active_tasks.load(.acquire) == 0;
+
+            if (queue_empty and no_active_tasks) {
+                // Double-check after a small delay to avoid race conditions
+                self.mutex.unlock();
+                std.time.sleep(5 * std.time.ns_per_ms); // 5ms
+                self.mutex.lock();
+
+                const still_queue_empty = self.task_queue.readableLength() == 0;
+                const still_no_active_tasks = self.active_tasks.load(.acquire) == 0;
+
+                if (still_queue_empty and still_no_active_tasks) {
+                    break;
+                }
+            }
+
+            // Wait for notification from worker threads
+            self.condition.wait(&self.mutex);
         }
     }
 
@@ -193,13 +209,26 @@ pub const ThreadPool = struct {
             }
 
             if (task) |t| {
+                // Increment active tasks count
                 _ = self.active_tasks.fetchAdd(1, .acq_rel);
 
                 self.logger.info("Worker {} executing step: {s}", .{ worker_id, t.step_id });
+
+                // Execute the task
                 t.execute();
 
-                _ = self.active_tasks.fetchSub(1, .acq_rel);
+                // Clean up task memory
                 self.allocator.destroy(t);
+
+                // Decrement active tasks count AFTER cleanup
+                _ = self.active_tasks.fetchSub(1, .acq_rel);
+
+                // Notify waiting threads that a task completed
+                {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+                    self.condition.broadcast();
+                }
             }
         }
 
@@ -262,12 +291,26 @@ pub const ParallelExecutor = struct {
         }
 
         // Submit all tasks
+        self.logger.info("Submitting {} tasks to thread pool", .{tasks.len});
         try self.thread_pool.submitBatch(tasks);
+        self.logger.info("All tasks submitted, waiting for completion", .{});
 
         // Wait for completion
         self.thread_pool.waitAll();
 
+        // Additional safety: ensure all results are populated
+        for (results, 0..) |result, i| {
+            if (result.status == .pending) {
+                self.logger.info("Warning: Task {} still pending after waitAll()", .{i});
+            }
+        }
+
+        self.logger.info("All tasks completed", .{});
+
         self.logger.info("Parallel execution completed", .{});
+
+        // Note: results array ownership is transferred to caller
+        // Caller is responsible for freeing the results array
         return results;
     }
 
