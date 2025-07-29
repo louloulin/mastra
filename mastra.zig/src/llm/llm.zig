@@ -20,6 +20,7 @@ pub const LLMProvider = enum {
     groq,
     ollama,
     deepseek,
+    google,
     custom,
 
     pub fn fromString(str: []const u8) ?LLMProvider {
@@ -28,6 +29,7 @@ pub const LLMProvider = enum {
         if (std.mem.eql(u8, str, "groq")) return .groq;
         if (std.mem.eql(u8, str, "ollama")) return .ollama;
         if (std.mem.eql(u8, str, "deepseek")) return .deepseek;
+        if (std.mem.eql(u8, str, "google")) return .google;
         if (std.mem.eql(u8, str, "custom")) return .custom;
         return null;
     }
@@ -39,6 +41,7 @@ pub const LLMProvider = enum {
             .groq => "groq",
             .ollama => "ollama",
             .deepseek => "deepseek",
+            .google => "google",
             .custom => "custom",
         };
     }
@@ -66,7 +69,7 @@ pub const LLMConfig = struct {
 
         // 检查需要 API 密钥的提供商
         switch (self.provider) {
-            .openai, .anthropic, .groq, .deepseek => {
+            .openai, .anthropic, .groq, .deepseek, .google => {
                 if (self.api_key == null) {
                     return error.ApiKeyRequired;
                 }
@@ -110,6 +113,7 @@ pub const LLMConfig = struct {
             .anthropic => "https://api.anthropic.com",
             .groq => "https://api.groq.com/openai/v1",
             .deepseek => "https://api.deepseek.com/v1",
+            .google => "https://generativelanguage.googleapis.com/v1beta",
             .ollama => "http://localhost:11434/v1",
             .custom => self.base_url orelse "",
         };
@@ -202,6 +206,8 @@ pub const LLM = struct {
     http_client: ?*HttpClient,
     openai_client: ?OpenAIClient,
     deepseek_client: ?DeepSeekClient,
+    anthropic_client: ?*const anyopaque,
+    google_client: ?*const anyopaque,
 
     const Self = @This();
 
@@ -217,6 +223,8 @@ pub const LLM = struct {
             .http_client = null,
             .openai_client = null,
             .deepseek_client = null,
+            .anthropic_client = null,
+            .google_client = null,
         };
         return llm;
     }
@@ -268,6 +276,7 @@ pub const LLM = struct {
             .openai, .groq => self.generateOpenAI(messages, options),
             .anthropic => self.generateAnthropic(messages, options),
             .deepseek => self.generateDeepSeek(messages, options),
+            .google => self.generateGoogle(messages, options),
             .ollama => self.generateOllama(messages, options),
             .custom => self.generateCustom(messages, options),
         };
@@ -288,6 +297,7 @@ pub const LLM = struct {
             .openai, .groq => self.generateStreamOpenAI(messages, options, callback),
             .anthropic => self.generateStreamAnthropic(messages, options, callback),
             .deepseek => self.generateStreamDeepSeek(messages, options, callback),
+            .google => self.generateStreamGoogle(messages, options, callback),
             .ollama => self.generateStreamOllama(messages, options, callback),
             .custom => self.generateStreamCustom(messages, options, callback),
         };
@@ -415,15 +425,64 @@ pub const LLM = struct {
 
     /// Anthropic Claude API 生成实现
     fn generateAnthropic(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
-        _ = messages;
-        _ = options;
-
-        // TODO: 实现 Anthropic API 调用
-        return GenerateResult.init(
+        const anthropic = @import("anthropic.zig");
+        
+        // 创建 Anthropic 客户端
+        var client = anthropic.AnthropicClient.init(
             self.allocator,
-            "Anthropic API not implemented yet",
-            self.config.model,
+            self.config.api_key orelse return LLMError.ApiKeyMissing,
+            self.http_client orelse return LLMError.HttpClientMissing,
+            self.config.base_url,
         );
+
+        // 转换消息格式
+        const anthropic_messages = try client.convertMessages(messages);
+        defer client.freeMessages(anthropic_messages);
+
+        // 构建请求
+        const request = anthropic.AnthropicRequest{
+            .model = self.config.model,
+            .max_tokens = if (options) |opts| opts.max_tokens else null orelse 4096,
+            .messages = anthropic_messages,
+            .temperature = if (options) |opts| opts.temperature else null orelse self.config.temperature,
+            .top_p = if (options) |opts| opts.top_p else null orelse self.config.top_p,
+            .stream = false,
+        };
+
+        // 发送请求
+        var response = client.messages(request) catch |err| {
+            return switch (err) {
+                anthropic.AnthropicError.ApiKeyMissing => LLMError.ApiKeyMissing,
+                anthropic.AnthropicError.HttpClientMissing => LLMError.HttpClientMissing,
+                anthropic.AnthropicError.RequestFailed => LLMError.RequestFailed,
+                anthropic.AnthropicError.ResponseParseError => LLMError.ResponseParseError,
+                anthropic.AnthropicError.RateLimitExceeded => LLMError.RateLimitExceeded,
+                anthropic.AnthropicError.AuthenticationError => LLMError.AuthenticationError,
+                else => LLMError.ApiError,
+            };
+        };
+        defer client.deinitCopy(&response);
+
+        // 提取文本内容
+        var content: []const u8 = "";
+        if (response.content.len > 0 and response.content[0].text != null) {
+            content = response.content[0].text.?;
+        }
+
+        // 构建结果
+        var result = try GenerateResult.init(self.allocator, content, response.model);
+        
+        if (response.stop_reason) |reason| {
+            result.finish_reason = try self.allocator.dupe(u8, reason);
+        }
+        
+        result.usage = LLMUsage{
+            .prompt_tokens = response.usage.input_tokens,
+            .completion_tokens = response.usage.output_tokens,
+            .total_tokens = response.usage.input_tokens + response.usage.output_tokens,
+        };
+        
+        return result;
     }
 
     /// Ollama API 生成实现
@@ -437,6 +496,75 @@ pub const LLM = struct {
             "Ollama API not implemented yet",
             self.config.model,
         );
+    }
+
+    /// Google Gemini API 生成实现
+    fn generateGoogle(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
+        const google = @import("google.zig");
+        
+        // 创建 Google 客户端
+         var client = google.GoogleClient.init(
+             self.allocator,
+             self.config.api_key orelse return LLMError.ApiKeyMissing,
+             self.http_client orelse return LLMError.HttpClientMissing,
+             self.config.model,
+             self.config.base_url,
+         );
+
+        // 转换消息格式
+         const google_contents = try client.convertMessages(messages);
+         defer client.freeContents(google_contents);
+
+        // 构建请求
+         const request = google.GeminiRequest{
+             .contents = google_contents,
+             .generation_config = google.GeminiGenerationConfig{
+                 .temperature = if (options) |opts| opts.temperature else null,
+                 .max_output_tokens = if (options) |opts| opts.max_tokens else null,
+                 .top_p = if (options) |opts| opts.top_p else null,
+             },
+         };
+
+        // 发送请求
+        var response = client.generateContent(request) catch |err| {
+            return switch (err) {
+                google.GoogleError.ApiKeyMissing => LLMError.ApiKeyMissing,
+                google.GoogleError.HttpClientMissing => LLMError.HttpClientMissing,
+                google.GoogleError.RequestFailed => LLMError.RequestFailed,
+                google.GoogleError.ResponseParseError => LLMError.ResponseParseError,
+                google.GoogleError.RateLimitExceeded => LLMError.RateLimitExceeded,
+                google.GoogleError.AuthenticationError => LLMError.AuthenticationError,
+                else => LLMError.ApiError,
+            };
+        };
+        defer client.deinitCopy(&response);
+
+        // 提取文本内容
+         var content: []const u8 = "";
+         if (response.candidates.len > 0 and response.candidates[0].content.parts.len > 0) {
+             if (response.candidates[0].content.parts[0].text) |text| {
+                 content = text;
+             }
+         }
+
+        // 构建结果
+        var result = try GenerateResult.init(self.allocator, content, self.config.model);
+        
+        if (response.candidates.len > 0) {
+            if (response.candidates[0].finish_reason) |reason| {
+                result.finish_reason = try self.allocator.dupe(u8, reason);
+            }
+        }
+        
+        if (response.usage_metadata) |usage| {
+            result.usage = LLMUsage{
+                .prompt_tokens = usage.prompt_token_count,
+                .completion_tokens = usage.candidates_token_count,
+                .total_tokens = usage.total_token_count,
+            };
+        }
+        
+        return result;
     }
 
     /// 自定义提供商生成实现
@@ -546,6 +674,20 @@ pub const LLM = struct {
         callback("Ollama streaming not implemented yet");
     }
 
+    /// Google 流式生成实现
+    fn generateStreamGoogle(
+        self: *LLM,
+        messages: []const Message,
+        options: ?GenerateOptions,
+        callback: *const fn (chunk: []const u8) void,
+    ) LLMError!void {
+        _ = self;
+        _ = messages;
+        _ = options;
+
+        callback("Google streaming not implemented yet");
+    }
+
     /// 自定义提供商流式生成实现
     fn generateStreamCustom(
         self: *LLM,
@@ -579,7 +721,9 @@ pub const LLM = struct {
     pub fn supportsStreaming(self: *const LLM) bool {
         return switch (self.config.provider) {
             .openai, .anthropic, .groq => true,
+            .google => true,
             .ollama => true,
+            .deepseek => true,
             .custom => false, // 取决于具体实现
         };
     }
@@ -588,7 +732,9 @@ pub const LLM = struct {
     pub fn supportsFunctionCalling(self: *const LLM) bool {
         return switch (self.config.provider) {
             .openai, .groq => true,
+            .google => true, // Google 支持函数调用
             .anthropic => false, // Anthropic 使用不同的工具调用格式
+            .deepseek => false,
             .ollama => false, // 取决于模型
             .custom => false, // 取决于具体实现
         };
