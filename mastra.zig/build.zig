@@ -42,6 +42,25 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    // 添加CLI工具
+    const cli_exe = b.addExecutable(.{
+        .name = "mastra-cli",
+        .root_source_file = b.path("src/cli/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cli_exe.linkLibC();
+    b.installArtifact(cli_exe);
+
+    const run_cli_cmd = b.addRunArtifact(cli_exe);
+    run_cli_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cli_cmd.addArgs(args);
+    }
+
+    const run_cli_step = b.step("cli", "Run the CLI tool");
+    run_cli_step.dependOn(&run_cli_cmd.step);
+
     // 添加安全模式测试
     const safe_mode_exe = b.addExecutable(.{
         .name = "mastra_safe",

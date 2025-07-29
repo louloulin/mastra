@@ -277,7 +277,7 @@ pub const Cli = struct {
     /// 显示版本信息
     fn showVersion(self: *Cli) !void {
         _ = self;
-        std.debug.print("Mastra CLI v0.1.0\n");
+        std.debug.print("Mastra CLI v0.1.0\n", .{});
         std.debug.print("基于 Zig {s}\n", .{@import("builtin").zig_version_string});
     }
 
@@ -313,10 +313,10 @@ pub const Cli = struct {
         // 创建项目结构
         try self.createProjectStructure(project_name, template, llm_provider, storage_type);
 
-        std.debug.print("✅ 项目初始化完成!\n");
-        std.debug.print("\n下一步:\n");
+        std.debug.print("✅ 项目初始化完成!\n", .{});
+        std.debug.print("\n下一步:\n", .{});
         std.debug.print("  cd {s}\n", .{project_name});
-        std.debug.print("  zig build run\n");
+        std.debug.print("  zig build run\n", .{});
     }
 
     /// 创建项目结构
@@ -346,7 +346,7 @@ pub const Cli = struct {
         // 创建 README.md
         try self.createReadmeFile(project_dir, project_name);
 
-        std.debug.print("📝 项目文件创建完成\n");
+        std.debug.print("📝 项目文件创建完成\n", .{});
     }
 
     /// 创建 build.zig 文件
@@ -641,7 +641,7 @@ pub const Cli = struct {
         std.debug.print("🔧 编译项目...\n", .{});
 
         // 编译项目
-        var build_process = std.ChildProcess.init(&[_][]const u8{ "zig", "build" }, self.allocator);
+        var build_process = std.process.Child.init(&[_][]const u8{ "zig", "build" }, self.allocator);
         build_process.stdout_behavior = if (verbose) .Inherit else .Ignore;
         build_process.stderr_behavior = .Inherit;
         
@@ -653,7 +653,7 @@ pub const Cli = struct {
         switch (build_result) {
             .Exited => |code| {
                 if (code != 0) {
-                    std.debug.print("❌ 构建失败，退出码: {}\n", .{code});
+                    std.debug.print("❌ 构建失败，退出码: {d}\n", .{code});
                     return CliError.BuildError;
                 }
             },
@@ -683,7 +683,7 @@ pub const Cli = struct {
                 if (try self.checkForFileChanges()) {
                     std.debug.print("🔄 检测到文件变化，重新编译...\n", .{});
                     
-                    var build_process = std.ChildProcess.init(&[_][]const u8{ "zig", "build" }, self.allocator);
+                    var build_process = std.process.Child.init(&[_][]const u8{ "zig", "build" }, self.allocator);
                     build_process.stdout_behavior = if (verbose) .Inherit else .Ignore;
                     build_process.stderr_behavior = .Inherit;
                     
@@ -697,7 +697,7 @@ pub const Cli = struct {
                             if (code == 0) {
                                 std.debug.print("✅ 重新编译成功\n", .{});
                             } else {
-                                std.debug.print("❌ 重新编译失败，退出码: {}\n", .{code});
+                                std.debug.print("❌ 重新编译失败，退出码: {d}\n", .{code});
                             }
                         },
                         else => {
@@ -719,7 +719,7 @@ pub const Cli = struct {
         _ = self;
         // 简单实现：检查 src 目录的修改时间
         const cwd = std.fs.cwd();
-        const src_dir = cwd.openIterableDir("src", .{}) catch return false;
+        var src_dir = cwd.openDir("src", .{}) catch return false;
         defer src_dir.close();
         
         // 这里可以实现更复杂的文件监控逻辑
@@ -790,7 +790,7 @@ pub const Cli = struct {
         std.debug.print("🔧 开始编译...\n", .{});
         
         // 执行构建
-        var build_process = std.ChildProcess.init(build_args.items, self.allocator);
+        var build_process = std.process.Child.init(build_args.items, self.allocator);
         build_process.stdout_behavior = if (verbose) .Inherit else .Pipe;
         build_process.stderr_behavior = .Inherit;
         
@@ -807,7 +807,7 @@ pub const Cli = struct {
                     // 显示构建产物信息
                     try self.showBuildArtifacts(output);
                 } else {
-                    std.debug.print("❌ 构建失败，退出码: {}\n", .{code});
+                    std.debug.print("❌ 构建失败，退出码: {d}\n", .{code});
                     return CliError.BuildError;
                 }
             },
@@ -842,7 +842,7 @@ pub const Cli = struct {
                     defer file.close();
                     
                     const file_size = file.getEndPos() catch 0;
-                    std.debug.print("📄 {s} ({} bytes)\n", .{ file_path, file_size });
+                    std.debug.print("📄 {s} ({d} bytes)\n", .{ file_path, file_size });
                 },
                 .directory => {
                     std.debug.print("📁 {s}/{s}/\n", .{ artifacts_dir, entry.name });
@@ -909,7 +909,7 @@ pub const Cli = struct {
         
         if (!platform_supported) {
             std.debug.print("❌ 错误: 不支持的部署平台 '{s}'\n", .{platform});
-            std.debug.print("支持的平台: ");
+            std.debug.print("支持的平台: ", .{});
             for (supported_platforms, 0..) |p, i| {
                 if (i > 0) std.debug.print(", ");
                 std.debug.print("{s}", .{p});
@@ -930,7 +930,7 @@ pub const Cli = struct {
         
         if (!env_supported) {
             std.debug.print("❌ 错误: 不支持的环境 '{s}'\n", .{env});
-            std.debug.print("支持的环境: ");
+            std.debug.print("支持的环境: ", .{});
             for (supported_envs, 0..) |e, i| {
                 if (i > 0) std.debug.print(", ");
                 std.debug.print("{s}", .{e});
@@ -1004,7 +1004,7 @@ pub const Cli = struct {
 
     /// 为部署构建项目
     fn buildForDeployment(self: *Cli, verbose: bool) !void {
-        var build_process = std.ChildProcess.init(&[_][]const u8{ "zig", "build", "-Doptimize=ReleaseFast" }, self.allocator);
+        var build_process = std.process.Child.init(&[_][]const u8{ "zig", "build", "-Doptimize=ReleaseFast" }, self.allocator);
         build_process.stdout_behavior = if (verbose) .Inherit else .Ignore;
         build_process.stderr_behavior = .Inherit;
         
@@ -1016,7 +1016,7 @@ pub const Cli = struct {
         switch (build_result) {
             .Exited => |code| {
                 if (code != 0) {
-                    std.debug.print("❌ 构建失败，退出码: {}\n", .{code});
+                    std.debug.print("❌ 构建失败，退出码: {d}\n", .{code});
                     return CliError.BuildError;
                 }
             },
@@ -1042,7 +1042,7 @@ pub const Cli = struct {
             std.debug.print("💻 准备本地环境\n", .{});
         }
         
-        std.debug.print("✅ 环境准备完成 ({})", .{env});
+        std.debug.print("✅ 环境准备完成 ({s})\n", .{env});
     }
 
     /// 部署到指定平台

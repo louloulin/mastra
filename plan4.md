@@ -14,8 +14,11 @@
 #### **LLM集成增强**
 - ✅ 修复了Anthropic API的可选类型处理问题
 - ✅ 完善了OpenAI、Anthropic、Google、DeepSeek的集成
+- ✅ **新增Cohere LLM提供商支持** - 完整的聊天、生成、嵌入和重排序功能
+- ✅ **新增Ollama LLM提供商支持** - 本地模型部署和管理功能
 - ✅ 解决了编译时的类型安全问题
 - ✅ 所有LLM提供商现在都能正常编译和运行
+- ✅ 统一的LLM接口支持6个主流提供商
 
 #### **代码质量提升**
 - ✅ 修复了所有编译警告和错误
@@ -39,8 +42,8 @@
 |---------|-----------|------------|--------|--------|
 | **核心Agent系统** | ✅ 完整 | ✅ 基础实现 | 70% | P0 |
 | **工作流引擎** | ✅ 完整 | ✅ 基础实现 | 60% | P0 |
-| **LLM集成** | ✅ 多提供商 | ✅ OpenAI/Anthropic/Google/DeepSeek | 70% | P0 |
-| **存储系统** | ✅ 20+后端 | ✅ 3个后端 | 15% | P0 |
+| **LLM集成** | ✅ 多提供商 | ✅ OpenAI/Anthropic/Google/DeepSeek/Cohere/Ollama | 85% | P0 |
+| **存储系统** | ✅ 20+后端 | ✅ 8个后端 | 40% | P0 |
 | **RAG系统** | ✅ 完整 | ✅ 基础实现 | 40% | P1 |
 | **工具系统** | ✅ 动态工具 | ✅ 静态工具 | 30% | P1 |
 | **内存管理** | ✅ 多后端 | ✅ 基础实现 | 50% | P1 |
@@ -65,10 +68,10 @@
 - **集成服务**: 100+ (GitHub, Slack, Discord等)
 
 **Mastra.zig当前状态**:
-- **存储后端**: 3个 (内存、PostgreSQL模拟、MongoDB模拟)
+- **存储后端**: 8个 (内存、PostgreSQL、MongoDB、Redis、MySQL、SQLite、DynamoDB、Pinecone)
 - **认证提供商**: 0个
 - **部署平台**: 0个
-- **LLM提供商**: 1个 (DeepSeek)
+- **LLM提供商**: 6个 (OpenAI、Anthropic、Google、DeepSeek、Cohere、Ollama)
 - **语音服务**: 0个
 - **集成服务**: 0个
 
@@ -507,9 +510,9 @@ pub const VoiceProvider = union(enum) {
 ## 🎯 **实施计划**
 
 ### **Q1 2025: 核心功能完善**
-- **Week 1-4**: LLM提供商扩展 (OpenAI, Anthropic, Google)
-- **Week 5-8**: 存储后端扩展 (PostgreSQL, MongoDB, Redis)
-- **Week 9-12**: CLI工具开发 (init, dev, build命令)
+- **Week 1-4**: ✅ **已完成** LLM提供商扩展 (OpenAI, Anthropic, Google, DeepSeek, Cohere, Ollama)
+- **Week 5-8**: ✅ **已完成** 存储后端扩展 (PostgreSQL, MongoDB, Redis, MySQL, SQLite, DynamoDB, Pinecone)
+- **Week 9-12**: 🔄 **进行中** CLI工具开发 (init, dev, build命令)
 
 ### **Q2 2025: 企业级功能**
 - **Week 1-4**: 认证系统 (Auth0, Clerk集成)

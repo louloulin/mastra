@@ -17,7 +17,15 @@ pub fn main() !void {
 
     // 解析参数（跳过程序名）
     if (args.len > 1) {
-        try cli_instance.parseArgs(args[1..]);
+        // 转换参数类型
+        var converted_args = std.ArrayList([]const u8).init(allocator);
+        defer converted_args.deinit();
+        
+        for (args[1..]) |arg| {
+            try converted_args.append(arg);
+        }
+        
+        try cli_instance.parseArgs(converted_args.items);
     }
 
     // 执行命令

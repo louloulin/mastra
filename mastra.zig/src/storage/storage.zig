@@ -6,6 +6,10 @@ pub const StorageType = enum {
     postgresql,
     sqlite,
     mongodb,
+    redis,
+    mysql,
+    dynamodb,
+    pinecone,
     custom,
 };
 

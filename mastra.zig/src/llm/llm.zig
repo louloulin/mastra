@@ -13,6 +13,18 @@ pub const DeepSeekRequest = @import("deepseek.zig").DeepSeekRequest;
 pub const DeepSeekResponse = @import("deepseek.zig").DeepSeekResponse;
 pub const DeepSeekMessage = @import("deepseek.zig").DeepSeekMessage;
 
+pub const CohereClient = @import("cohere.zig").CohereClient;
+pub const CohereRequest = @import("cohere.zig").CohereRequest;
+pub const CohereResponse = @import("cohere.zig").CohereResponse;
+pub const CohereMessage = @import("cohere.zig").CohereMessage;
+
+pub const OllamaClient = @import("ollama.zig").OllamaClient;
+pub const OllamaRequest = @import("ollama.zig").OllamaRequest;
+pub const OllamaResponse = @import("ollama.zig").OllamaResponse;
+pub const OllamaChatResponse = @import("ollama.zig").OllamaChatResponse;
+pub const OllamaMessage = @import("ollama.zig").OllamaMessage;
+pub const OllamaOptions = @import("ollama.zig").OllamaOptions;
+
 /// LLM 提供商类型
 pub const LLMProvider = enum {
     openai,
@@ -21,6 +33,7 @@ pub const LLMProvider = enum {
     ollama,
     deepseek,
     google,
+    cohere,
     custom,
 
     pub fn fromString(str: []const u8) ?LLMProvider {
@@ -30,6 +43,7 @@ pub const LLMProvider = enum {
         if (std.mem.eql(u8, str, "ollama")) return .ollama;
         if (std.mem.eql(u8, str, "deepseek")) return .deepseek;
         if (std.mem.eql(u8, str, "google")) return .google;
+        if (std.mem.eql(u8, str, "cohere")) return .cohere;
         if (std.mem.eql(u8, str, "custom")) return .custom;
         return null;
     }
@@ -42,6 +56,7 @@ pub const LLMProvider = enum {
             .ollama => "ollama",
             .deepseek => "deepseek",
             .google => "google",
+            .cohere => "cohere",
             .custom => "custom",
         };
     }
@@ -69,7 +84,7 @@ pub const LLMConfig = struct {
 
         // 检查需要 API 密钥的提供商
         switch (self.provider) {
-            .openai, .anthropic, .groq, .deepseek, .google => {
+            .openai, .anthropic, .groq, .deepseek, .google, .cohere => {
                 if (self.api_key == null) {
                     return error.ApiKeyRequired;
                 }
@@ -114,7 +129,8 @@ pub const LLMConfig = struct {
             .groq => "https://api.groq.com/openai/v1",
             .deepseek => "https://api.deepseek.com/v1",
             .google => "https://generativelanguage.googleapis.com/v1beta",
-            .ollama => "http://localhost:11434/v1",
+            .cohere => "https://api.cohere.ai/v1",
+            .ollama => "http://localhost:11434",
             .custom => self.base_url orelse "",
         };
     }
@@ -206,6 +222,8 @@ pub const LLM = struct {
     http_client: ?*HttpClient,
     openai_client: ?OpenAIClient,
     deepseek_client: ?DeepSeekClient,
+    cohere_client: ?CohereClient,
+    ollama_client: ?OllamaClient,
     anthropic_client: ?*const anyopaque,
     google_client: ?*const anyopaque,
 
@@ -223,6 +241,8 @@ pub const LLM = struct {
             .http_client = null,
             .openai_client = null,
             .deepseek_client = null,
+            .cohere_client = null,
+            .ollama_client = null,
             .anthropic_client = null,
             .google_client = null,
         };
@@ -260,6 +280,23 @@ pub const LLM = struct {
                     );
                 }
             },
+            .cohere => {
+                if (self.config.api_key) |api_key| {
+                    self.cohere_client = CohereClient.init(
+                        self.allocator,
+                        api_key,
+                        client,
+                        self.config.base_url,
+                    );
+                }
+            },
+            .ollama => {
+                self.ollama_client = OllamaClient.init(
+                    self.allocator,
+                    client,
+                    self.config.base_url,
+                );
+            },
             else => {
                 // 其他提供商暂时不需要特殊客户端
             },
@@ -277,6 +314,7 @@ pub const LLM = struct {
             .anthropic => self.generateAnthropic(messages, options),
             .deepseek => self.generateDeepSeek(messages, options),
             .google => self.generateGoogle(messages, options),
+            .cohere => self.generateCohere(messages, options),
             .ollama => self.generateOllama(messages, options),
             .custom => self.generateCustom(messages, options),
         };
@@ -298,6 +336,7 @@ pub const LLM = struct {
             .anthropic => self.generateStreamAnthropic(messages, options, callback),
             .deepseek => self.generateStreamDeepSeek(messages, options, callback),
             .google => self.generateStreamGoogle(messages, options, callback),
+            .cohere => self.generateStreamCohere(messages, options, callback),
             .ollama => self.generateStreamOllama(messages, options, callback),
             .custom => self.generateStreamCustom(messages, options, callback),
         };
@@ -485,19 +524,6 @@ pub const LLM = struct {
         return result;
     }
 
-    /// Ollama API 生成实现
-    fn generateOllama(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
-        _ = messages;
-        _ = options;
-
-        // TODO: 实现 Ollama API 调用
-        return GenerateResult.init(
-            self.allocator,
-            "Ollama API not implemented yet",
-            self.config.model,
-        );
-    }
-
     /// Google Gemini API 生成实现
     fn generateGoogle(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
         const google = @import("google.zig");
@@ -564,6 +590,133 @@ pub const LLM = struct {
             };
         }
         
+        return result;
+    }
+
+    /// Cohere API 生成实现
+    fn generateCohere(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
+        if (self.cohere_client == null) {
+            return LLMError.ConfigurationError;
+        }
+
+        const client = &self.cohere_client.?;
+
+        // 转换消息格式
+        var cohere_messages = std.ArrayList(CohereMessage).init(self.allocator);
+        defer cohere_messages.deinit();
+
+        for (messages) |msg| {
+            try cohere_messages.append(CohereMessage.init(msg.role, msg.content));
+        }
+
+        // 构建请求
+        var request = CohereRequest.init("", self.config.model);
+        request.setMessages(cohere_messages.items);
+        
+        if (options) |opts| {
+            if (opts.temperature) |temp| request.setTemperature(temp);
+            if (opts.max_tokens) |tokens| request.setMaxTokens(tokens);
+            if (opts.top_p) |top_p| request.setTopP(top_p);
+            if (opts.frequency_penalty) |penalty| request.setFrequencyPenalty(penalty);
+            if (opts.presence_penalty) |penalty| request.setPresencePenalty(penalty);
+            if (opts.stop_sequences) |stop| request.setStopSequences(stop);
+        } else {
+            request.setTemperature(self.config.temperature);
+            if (self.config.max_tokens) |tokens| request.setMaxTokens(tokens);
+            if (self.config.top_p) |top_p| request.setTopP(top_p);
+            if (self.config.frequency_penalty) |penalty| request.setFrequencyPenalty(penalty);
+            if (self.config.presence_penalty) |penalty| request.setPresencePenalty(penalty);
+            if (self.config.stop_sequences) |stop| request.setStopSequences(stop);
+        }
+
+        // 发送请求
+        var response = client.chat(request) catch |err| {
+            return switch (err) {
+                error.RequestFailed => LLMError.RequestFailed,
+                error.ResponseParseError => LLMError.ResponseParseError,
+                error.OutOfMemory => LLMError.OutOfMemory,
+                else => LLMError.ApiError,
+            };
+        };
+        defer response.deinit();
+
+        // 转换为统一格式
+        var result = try GenerateResult.init(self.allocator, response.text, response.generation_id orelse "unknown");
+        
+        if (response.finish_reason) |reason| {
+            result.finish_reason = try self.allocator.dupe(u8, reason);
+        }
+
+        if (response.meta) |meta| {
+            result.usage = LLMUsage.init(
+                meta.input_tokens,
+                meta.output_tokens,
+            );
+        }
+
+        return result;
+    }
+
+    /// Ollama API 生成实现
+    fn generateOllama(self: *LLM, messages: []const Message, options: ?GenerateOptions) LLMError!GenerateResult {
+        if (self.ollama_client == null) {
+            return LLMError.ConfigurationError;
+        }
+
+        const client = &self.ollama_client.?;
+
+        // 转换消息格式
+        var ollama_messages = std.ArrayList(OllamaMessage).init(self.allocator);
+        defer ollama_messages.deinit();
+
+        for (messages) |msg| {
+            try ollama_messages.append(OllamaMessage.init(msg.role, msg.content));
+        }
+
+        // 构建请求
+        var request = OllamaRequest.init(self.config.model);
+        request.setMessages(ollama_messages.items);
+        
+        // 设置选项
+        var ollama_options = OllamaOptions.init();
+        if (options) |opts| {
+            if (opts.temperature) |temp| ollama_options.setTemperature(temp);
+            if (opts.max_tokens) |tokens| ollama_options.setNumPredict(tokens);
+            if (opts.top_p) |top_p| ollama_options.setTopP(top_p);
+            if (opts.stop_sequences) |stop| ollama_options.setStop(stop);
+        } else {
+            ollama_options.setTemperature(self.config.temperature);
+            if (self.config.max_tokens) |tokens| ollama_options.setNumPredict(tokens);
+            if (self.config.top_p) |top_p| ollama_options.setTopP(top_p);
+            if (self.config.stop_sequences) |stop| ollama_options.setStop(stop);
+        }
+        request.setOptions(ollama_options);
+
+        // 发送请求
+        var response = client.chat(request) catch |err| {
+            return switch (err) {
+                error.RequestFailed => LLMError.RequestFailed,
+                error.ResponseParseError => LLMError.ResponseParseError,
+                error.OutOfMemory => LLMError.OutOfMemory,
+                else => LLMError.ApiError,
+            };
+        };
+        defer response.deinit();
+
+        // 转换为统一格式
+        var result = try GenerateResult.init(self.allocator, response.message.content, response.model);
+        
+        // Ollama 通常不提供 finish_reason
+        if (response.done) {
+            result.finish_reason = try self.allocator.dupe(u8, "stop");
+        }
+
+        // 计算使用统计
+        if (response.eval_count) |eval_count| {
+            const prompt_count = response.prompt_eval_count orelse 0;
+            result.usage = LLMUsage.init(prompt_count, eval_count);
+        }
+
         return result;
     }
 
@@ -660,6 +813,20 @@ pub const LLM = struct {
         callback("Anthropic streaming not implemented yet");
     }
 
+    /// Cohere 流式生成实现
+    fn generateStreamCohere(
+        self: *LLM,
+        messages: []const Message,
+        options: ?GenerateOptions,
+        callback: *const fn (chunk: []const u8) void,
+    ) LLMError!void {
+        _ = self;
+        _ = messages;
+        _ = options;
+
+        callback("Cohere streaming not implemented yet");
+    }
+
     /// Ollama 流式生成实现
     fn generateStreamOllama(
         self: *LLM,
@@ -735,6 +902,7 @@ pub const LLM = struct {
             .google => true, // Google 支持函数调用
             .anthropic => false, // Anthropic 使用不同的工具调用格式
             .deepseek => false,
+            .cohere => true, // Cohere 支持工具调用
             .ollama => false, // 取决于模型
             .custom => false, // 取决于具体实现
         };

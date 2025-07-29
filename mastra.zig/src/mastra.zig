@@ -33,6 +33,9 @@ pub const evaluator = @import("evaluation/evaluator.zig");
 pub const integration = @import("integration/auth.zig");
 pub const postgresql = @import("storage/postgresql.zig");
 pub const mongodb = @import("storage/mongodb.zig");
+pub const redis = @import("storage/redis.zig");
+pub const mysql = @import("storage/mysql.zig");
+pub const dynamodb = @import("storage/dynamodb.zig");
 pub const memory = @import("memory/memory.zig");
 pub const llm = @import("llm/llm.zig");
 pub const telemetry = @import("telemetry/telemetry.zig");
@@ -139,6 +142,20 @@ pub const PostgreSQLStorage = postgresql.PostgreSQLStorage;
 pub const PostgreSQLConfig = postgresql.PostgreSQLConfig;
 pub const MongoDBStorage = mongodb.MongoDBStorage;
 pub const MongoDBConfig = mongodb.MongoDBConfig;
+pub const RedisStorage = redis.RedisStorage;
+pub const RedisConfig = redis.RedisConfig;
+
+pub const MySQLStorage = mysql.MySQLStorage;
+pub const MySQLConfig = mysql.MySQLConfig;
+
+pub const DynamoDBStorage = dynamodb.DynamoDBStorage;
+pub const DynamoDBConfig = dynamodb.DynamoDBConfig;
+
+pub const pinecone = @import("storage/pinecone.zig");
+pub const PineconeStorage = pinecone.PineconeStorage;
+pub const PineconeConfig = pinecone.PineconeConfig;
+pub const PineconeVector = pinecone.PineconeVector;
+pub const PineconeQueryResponse = pinecone.PineconeQueryResponse;
 
 pub const Memory = memory.Memory;
 pub const MemoryConfig = memory.MemoryConfig;
@@ -146,6 +163,28 @@ pub const MemoryConfig = memory.MemoryConfig;
 pub const LLM = llm.LLM;
 pub const LLMConfig = llm.LLMConfig;
 pub const LLMProvider = llm.LLMProvider;
+pub const LLMError = llm.LLMError;
+pub const LLMUsage = llm.LLMUsage;
+pub const GenerateOptions = llm.GenerateOptions;
+pub const GenerateResult = llm.GenerateResult;
+pub const OpenAIClient = llm.OpenAIClient;
+pub const OpenAIRequest = llm.OpenAIRequest;
+pub const OpenAIResponse = llm.OpenAIResponse;
+pub const OpenAIMessage = llm.OpenAIMessage;
+pub const DeepSeekClient = llm.DeepSeekClient;
+pub const DeepSeekRequest = llm.DeepSeekRequest;
+pub const DeepSeekResponse = llm.DeepSeekResponse;
+pub const DeepSeekMessage = llm.DeepSeekMessage;
+pub const CohereClient = llm.CohereClient;
+pub const CohereRequest = llm.CohereRequest;
+pub const CohereResponse = llm.CohereResponse;
+pub const CohereMessage = llm.CohereMessage;
+pub const OllamaClient = llm.OllamaClient;
+pub const OllamaRequest = llm.OllamaRequest;
+pub const OllamaResponse = llm.OllamaResponse;
+pub const OllamaChatResponse = llm.OllamaChatResponse;
+pub const OllamaMessage = llm.OllamaMessage;
+pub const OllamaOptions = llm.OllamaOptions;
 
 pub const Telemetry = telemetry.Telemetry;
 pub const TelemetryConfig = telemetry.TelemetryConfig;
@@ -161,9 +200,3 @@ pub const LogLevel = utils.LogLevel;
 pub const LRUCache = cache.LRUCache;
 pub const CacheConfig = cache.CacheConfig;
 pub const CacheStats = cache.CacheStats;
-
-// DeepSeek API 支持
-pub const DeepSeekClient = llm.DeepSeekClient;
-pub const DeepSeekRequest = llm.DeepSeekRequest;
-pub const DeepSeekResponse = llm.DeepSeekResponse;
-pub const DeepSeekMessage = llm.DeepSeekMessage;
