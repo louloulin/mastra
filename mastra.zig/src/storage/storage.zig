@@ -3,6 +3,7 @@ const std = @import("std");
 pub const StorageType = enum {
     memory,
     postgres,
+    postgresql,
     sqlite,
     mongodb,
     custom,

@@ -287,6 +287,70 @@ fn addExampleTargets(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     const run_storage_comprehensive_step = b.step("run-storage-comprehensive", "Run comprehensive storage example");
     run_storage_comprehensive_step.dependOn(&run_storage_comprehensive_cmd.step);
 
+    // Storage backends test
+    const storage_backends_exe = b.addExecutable(.{
+        .name = "storage_backends",
+        .root_source_file = b.path("examples/storage/test_storage_backends.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    storage_backends_exe.root_module.addImport("mastra", mastra_module);
+    storage_backends_exe.linkLibC();
+    b.installArtifact(storage_backends_exe);
+
+    const run_storage_backends_cmd = b.addRunArtifact(storage_backends_exe);
+    run_storage_backends_cmd.step.dependOn(b.getInstallStep());
+    const run_storage_backends_step = b.step("run-storage-backends", "Run storage backends test");
+    run_storage_backends_step.dependOn(&run_storage_backends_cmd.step);
+
+    // Dynamic tools test
+    const dynamic_tools_exe = b.addExecutable(.{
+        .name = "dynamic_tools",
+        .root_source_file = b.path("examples/tools/test_dynamic_tools.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dynamic_tools_exe.root_module.addImport("mastra", mastra_module);
+    dynamic_tools_exe.linkLibC();
+    b.installArtifact(dynamic_tools_exe);
+
+    const run_dynamic_tools_cmd = b.addRunArtifact(dynamic_tools_exe);
+    run_dynamic_tools_cmd.step.dependOn(b.getInstallStep());
+    const run_dynamic_tools_step = b.step("run-dynamic-tools", "Run dynamic tools test");
+    run_dynamic_tools_step.dependOn(&run_dynamic_tools_cmd.step);
+
+    // Advanced RAG test (simple)
+    const advanced_rag_simple_exe = b.addExecutable(.{
+        .name = "advanced_rag_simple",
+        .root_source_file = b.path("examples/rag/test_advanced_rag_simple.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    advanced_rag_simple_exe.root_module.addImport("mastra", mastra_module);
+    advanced_rag_simple_exe.linkLibC();
+    b.installArtifact(advanced_rag_simple_exe);
+
+    const run_advanced_rag_simple_cmd = b.addRunArtifact(advanced_rag_simple_exe);
+    run_advanced_rag_simple_cmd.step.dependOn(b.getInstallStep());
+    const run_advanced_rag_simple_step = b.step("run-advanced-rag-simple", "Run advanced RAG test (simple)");
+    run_advanced_rag_simple_step.dependOn(&run_advanced_rag_simple_cmd.step);
+
+    // Plan3 verification test
+    const plan3_verification_exe = b.addExecutable(.{
+        .name = "plan3_verification",
+        .root_source_file = b.path("examples/features/test_plan3_verification.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    plan3_verification_exe.root_module.addImport("mastra", mastra_module);
+    plan3_verification_exe.linkLibC();
+    b.installArtifact(plan3_verification_exe);
+
+    const run_plan3_verification_cmd = b.addRunArtifact(plan3_verification_exe);
+    run_plan3_verification_cmd.step.dependOn(b.getInstallStep());
+    const run_plan3_verification_step = b.step("run-plan3-verification", "Run Plan3 functionality verification");
+    run_plan3_verification_step.dependOn(&run_plan3_verification_cmd.step);
+
     const run_rag_system_cmd = b.addRunArtifact(rag_system_exe);
     run_rag_system_cmd.step.dependOn(b.getInstallStep());
     const run_rag_system_step = b.step("run-rag-system", "Run RAG system example");
