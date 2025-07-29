@@ -214,7 +214,7 @@ pub const VectorStore = struct {
 
                 if (score >= config.min_score) {
                     try results.append(SearchResult{
-                        .chunk = chunk.*, // 复制chunk而不是借用
+                        .chunk = chunk, // 使用指针
                         .score = score,
                         .rank = i,
                     });

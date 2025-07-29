@@ -52,6 +52,10 @@ pub const DocumentChunk = struct {
         if (self.embedding) |embedding| {
             allocator.free(embedding);
         }
+        // 释放 JSON 对象
+        if (self.metadata == .object) {
+            self.metadata.object.deinit();
+        }
     }
 };
 

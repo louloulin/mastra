@@ -245,6 +245,16 @@ fn addExampleTargets(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     rag_system_exe.linkLibC();
     b.installArtifact(rag_system_exe);
 
+    const simple_rag_exe = b.addExecutable(.{
+        .name = "simple_rag",
+        .root_source_file = b.path("examples/rag/simple_rag_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    simple_rag_exe.root_module.addImport("mastra", mastra_module);
+    simple_rag_exe.linkLibC();
+    b.installArtifact(simple_rag_exe);
+
     // Workflow examples
     const parallel_workflow_exe = b.addExecutable(.{
         .name = "parallel_workflow",
@@ -281,6 +291,11 @@ fn addExampleTargets(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     run_rag_system_cmd.step.dependOn(b.getInstallStep());
     const run_rag_system_step = b.step("run-rag-system", "Run RAG system example");
     run_rag_system_step.dependOn(&run_rag_system_cmd.step);
+
+    const run_simple_rag_cmd = b.addRunArtifact(simple_rag_exe);
+    run_simple_rag_cmd.step.dependOn(b.getInstallStep());
+    const run_simple_rag_step = b.step("run-simple-rag", "Run simple RAG test");
+    run_simple_rag_step.dependOn(&run_simple_rag_cmd.step);
 
     const run_parallel_workflow_cmd = b.addRunArtifact(parallel_workflow_exe);
     run_parallel_workflow_cmd.step.dependOn(b.getInstallStep());
