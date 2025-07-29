@@ -110,7 +110,34 @@ pub fn build(b: *std.Build) void {
     const mastra_module = b.createModule(.{
         .root_source_file = b.path("src/mastra.zig"),
     });
+
+    // 创建 CLI 模块
+    const cli_module = b.createModule(.{
+        .root_source_file = b.path("src/cli/cli.zig"),
+    });
+
+    // 为unit_tests和simple_tests添加mastra模块导入
+    unit_tests.root_module.addImport("mastra", mastra_module);
+    unit_tests.root_module.addImport("cli", cli_module);
+    simple_tests.root_module.addImport("mastra", mastra_module);
+    simple_tests.root_module.addImport("cli", cli_module);
+
+    // 添加CLI高级测试
+    const cli_advanced_tests = b.addTest(.{
+        .root_source_file = b.path("test/cli_advanced_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cli_advanced_tests.root_module.addImport("mastra", mastra_module);
+    cli_advanced_tests.root_module.addImport("cli", cli_module);
+    cli_advanced_tests.linkLibC();
+
+    const run_cli_advanced_tests = b.addRunArtifact(cli_advanced_tests);
+    const cli_advanced_test_step = b.step("test-cli-advanced", "Run CLI advanced tests");
+    cli_advanced_test_step.dependOn(&run_cli_advanced_tests.step);
+
     integration_tests.root_module.addImport("mastra", mastra_module);
+    integration_tests.root_module.addImport("cli", cli_module);
     integration_tests.linkLibC();
 
     // 添加真实API测试
@@ -120,6 +147,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     real_api_tests.root_module.addImport("mastra", mastra_module);
+    real_api_tests.root_module.addImport("cli", cli_module);
     real_api_tests.linkLibC();
 
     // 添加DeepSeek API测试
@@ -129,6 +157,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     deepseek_tests.root_module.addImport("mastra", mastra_module);
+    deepseek_tests.root_module.addImport("cli", cli_module);
     deepseek_tests.linkLibC();
 
     // 添加DeepSeek简化测试
@@ -138,6 +167,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     deepseek_simple_tests.root_module.addImport("mastra", mastra_module);
+    deepseek_simple_tests.root_module.addImport("cli", cli_module);
     deepseek_simple_tests.linkLibC();
 
     // 添加Agent DeepSeek测试
@@ -147,6 +177,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     agent_deepseek_tests.root_module.addImport("mastra", mastra_module);
+    agent_deepseek_tests.root_module.addImport("cli", cli_module);
     agent_deepseek_tests.linkLibC();
 
     const run_integration_tests = b.addRunArtifact(integration_tests);

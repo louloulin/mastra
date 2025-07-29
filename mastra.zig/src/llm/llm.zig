@@ -442,10 +442,10 @@ pub const LLM = struct {
         // 构建请求
         const request = anthropic.AnthropicRequest{
             .model = self.config.model,
-            .max_tokens = if (options) |opts| opts.max_tokens else null orelse 4096,
+            .max_tokens = if (options) |opts| opts.max_tokens orelse 4096 else 4096,
             .messages = anthropic_messages,
-            .temperature = if (options) |opts| opts.temperature else null orelse self.config.temperature,
-            .top_p = if (options) |opts| opts.top_p else null orelse self.config.top_p,
+            .temperature = if (options) |opts| opts.temperature orelse self.config.temperature else self.config.temperature,
+            .top_p = if (options) |opts| opts.top_p orelse self.config.top_p else self.config.top_p,
             .stream = false,
         };
 
