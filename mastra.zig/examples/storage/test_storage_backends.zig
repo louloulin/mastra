@@ -167,7 +167,13 @@ fn testMongoDBStorage(allocator: std.mem.Allocator) !void {
     };
 
     const query_results = try mongo_storage.query("mongo_users", query_config);
-    defer allocator.free(query_results);
+    defer {
+        for (query_results) |*doc| {
+            var mutable_doc = doc.*;
+            mutable_doc.deinit();
+        }
+        allocator.free(query_results);
+    }
     std.debug.print("   ✅ 查询结果: {} 条记录\n", .{query_results.len});
 
     // 测试索引创建

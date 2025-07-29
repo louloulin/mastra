@@ -31,8 +31,16 @@ pub const BSONDocument = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        // JSON values don't need explicit deinitialization in this context
-        _ = self;
+        if (self.data == .object) {
+            // Free all string values in the object
+            var iterator = self.data.object.iterator();
+            while (iterator.next()) |entry| {
+                if (entry.value_ptr.* == .string) {
+                    self.allocator.free(entry.value_ptr.*.string);
+                }
+            }
+            self.data.object.deinit();
+        }
     }
 
     pub fn put(self: *Self, key: []const u8, value: std.json.Value) !void {
@@ -160,8 +168,14 @@ pub const MongoConnection = struct {
         while (i < limit and i < 5) : (i += 1) { // Max 5 mock results
             var doc = BSONDocument.init(self.allocator);
             const id = try std.fmt.allocPrint(self.allocator, "mock_id_{d}", .{i});
-            try doc.put("_id", std.json.Value{ .string = id });
-            try doc.put("data", std.json.Value{ .string = "mock_data" });
+            defer self.allocator.free(id); // Free the allocated string
+
+            // Create owned copies for the JSON values
+            const id_copy = try self.allocator.dupe(u8, id);
+            const data_copy = try self.allocator.dupe(u8, "mock_data");
+
+            try doc.put("_id", std.json.Value{ .string = id_copy });
+            try doc.put("data", std.json.Value{ .string = data_copy });
             try results.append(doc);
         }
 

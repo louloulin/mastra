@@ -36,9 +36,11 @@ pub const mongodb = @import("storage/mongodb.zig");
 pub const memory = @import("memory/memory.zig");
 pub const llm = @import("llm/llm.zig");
 pub const telemetry = @import("telemetry/telemetry.zig");
+pub const performance_monitor = @import("telemetry/performance_monitor.zig");
 pub const vector = @import("storage/vector.zig");
 pub const utils = @import("utils/logger.zig");
 pub const cache = @import("utils/cache.zig");
+pub const advanced_cache = @import("utils/advanced_cache.zig");
 
 // HTTP客户端和网络
 pub const http = @import("core/http.zig");

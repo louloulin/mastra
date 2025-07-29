@@ -319,37 +319,37 @@ fn addExampleTargets(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     const run_dynamic_tools_step = b.step("run-dynamic-tools", "Run dynamic tools test");
     run_dynamic_tools_step.dependOn(&run_dynamic_tools_cmd.step);
 
-    // Advanced RAG test (simple)
-    const advanced_rag_simple_exe = b.addExecutable(.{
-        .name = "advanced_rag_simple",
-        .root_source_file = b.path("examples/rag/test_advanced_rag_simple.zig"),
+    // Simple cache test
+    const simple_cache_exe = b.addExecutable(.{
+        .name = "simple_cache",
+        .root_source_file = b.path("examples/features/test_simple_cache.zig"),
         .target = target,
         .optimize = optimize,
     });
-    advanced_rag_simple_exe.root_module.addImport("mastra", mastra_module);
-    advanced_rag_simple_exe.linkLibC();
-    b.installArtifact(advanced_rag_simple_exe);
+    simple_cache_exe.root_module.addImport("mastra", mastra_module);
+    simple_cache_exe.linkLibC();
+    b.installArtifact(simple_cache_exe);
 
-    const run_advanced_rag_simple_cmd = b.addRunArtifact(advanced_rag_simple_exe);
-    run_advanced_rag_simple_cmd.step.dependOn(b.getInstallStep());
-    const run_advanced_rag_simple_step = b.step("run-advanced-rag-simple", "Run advanced RAG test (simple)");
-    run_advanced_rag_simple_step.dependOn(&run_advanced_rag_simple_cmd.step);
+    const run_simple_cache_cmd = b.addRunArtifact(simple_cache_exe);
+    run_simple_cache_cmd.step.dependOn(b.getInstallStep());
+    const run_simple_cache_step = b.step("run-simple-cache", "Run simple cache system test");
+    run_simple_cache_step.dependOn(&run_simple_cache_cmd.step);
 
-    // Plan3 verification test
-    const plan3_verification_exe = b.addExecutable(.{
-        .name = "plan3_verification",
-        .root_source_file = b.path("examples/features/test_plan3_verification.zig"),
+    // Simple performance test
+    const simple_performance_exe = b.addExecutable(.{
+        .name = "simple_performance",
+        .root_source_file = b.path("examples/features/test_simple_performance.zig"),
         .target = target,
         .optimize = optimize,
     });
-    plan3_verification_exe.root_module.addImport("mastra", mastra_module);
-    plan3_verification_exe.linkLibC();
-    b.installArtifact(plan3_verification_exe);
+    simple_performance_exe.root_module.addImport("mastra", mastra_module);
+    simple_performance_exe.linkLibC();
+    b.installArtifact(simple_performance_exe);
 
-    const run_plan3_verification_cmd = b.addRunArtifact(plan3_verification_exe);
-    run_plan3_verification_cmd.step.dependOn(b.getInstallStep());
-    const run_plan3_verification_step = b.step("run-plan3-verification", "Run Plan3 functionality verification");
-    run_plan3_verification_step.dependOn(&run_plan3_verification_cmd.step);
+    const run_simple_performance_cmd = b.addRunArtifact(simple_performance_exe);
+    run_simple_performance_cmd.step.dependOn(b.getInstallStep());
+    const run_simple_performance_step = b.step("run-simple-performance", "Run simple performance monitoring test");
+    run_simple_performance_step.dependOn(&run_simple_performance_cmd.step);
 
     const run_rag_system_cmd = b.addRunArtifact(rag_system_exe);
     run_rag_system_cmd.step.dependOn(b.getInstallStep());
