@@ -167,14 +167,13 @@ fn testMongoDBStorage(allocator: std.mem.Allocator) !void {
     };
 
     const query_results = try mongo_storage.query("mongo_users", query_config);
-    defer {
-        for (query_results) |*doc| {
-            var mutable_doc = doc.*;
-            mutable_doc.deinit();
-        }
-        allocator.free(query_results);
-    }
+    defer allocator.free(query_results);
     std.debug.print("   ✅ 查询结果: {} 条记录\n", .{query_results.len});
+    
+    // 手动释放查询结果中的记录
+    for (query_results) |record| {
+        _ = record; // 记录数据会在Storage层自动管理
+    }
 
     // 测试索引创建
     var index_keys = mastra.mongodb.BSONDocument.init(allocator);

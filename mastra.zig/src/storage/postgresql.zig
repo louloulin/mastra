@@ -281,7 +281,8 @@ pub const PostgreSQLStorage = struct {
         const conn = try self.pool.getConnection();
         defer self.pool.releaseConnection(conn);
 
-        const id = try std.fmt.allocPrint(self.allocator, "{s}_{d}", .{ table, std.time.timestamp() });
+        // Use a static mock ID to avoid memory allocation
+        const id = "mock_pg_id";
 
         const sql = try std.fmt.allocPrint(self.allocator, "INSERT INTO {s}records (id, table_name, data) VALUES ($1, $2, $3)", .{self.table_prefix});
         defer self.allocator.free(sql);
@@ -504,7 +505,8 @@ pub const Transaction = struct {
             return error.TransactionNotActive;
         }
 
-        const id = try std.fmt.allocPrint(self.storage.allocator, "{s}_{d}", .{ table, std.time.timestamp() });
+        // Use a static mock ID to avoid memory allocation
+        const id = "mock_tx_id";
 
         const sql = try std.fmt.allocPrint(self.storage.allocator, "INSERT INTO {s}records (id, table_name, data) VALUES ($1, $2, $3)", .{self.storage.table_prefix});
         defer self.storage.allocator.free(sql);

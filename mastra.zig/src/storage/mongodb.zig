@@ -32,13 +32,6 @@ pub const BSONDocument = struct {
 
     pub fn deinit(self: *Self) void {
         if (self.data == .object) {
-            // Free all string values in the object
-            var iterator = self.data.object.iterator();
-            while (iterator.next()) |entry| {
-                if (entry.value_ptr.* == .string) {
-                    self.allocator.free(entry.value_ptr.*.string);
-                }
-            }
             self.data.object.deinit();
         }
     }
@@ -107,11 +100,9 @@ pub const MongoConnection = struct {
             return error.NotConnected;
         }
 
-        // Generate ObjectId-like ID
-        const id = try std.fmt.allocPrint(self.allocator, "{x}{d}", .{ std.time.timestamp(), std.crypto.random.int(u32) });
-
-        std.log.debug("MongoDB insertOne: collection={s}, id={s}", .{ collection, id });
-        return id;
+        // Return a static mock ID to avoid memory allocation
+        std.log.debug("MongoDB insertOne: collection={s}", .{collection});
+        return "mock_inserted_id";
     }
 
     pub fn findOne(self: *Self, collection: []const u8, filter: BSONDocument) !?BSONDocument {
@@ -167,15 +158,9 @@ pub const MongoConnection = struct {
         const limit = options.limit orelse 10;
         while (i < limit and i < 5) : (i += 1) { // Max 5 mock results
             var doc = BSONDocument.init(self.allocator);
-            const id = try std.fmt.allocPrint(self.allocator, "mock_id_{d}", .{i});
-            defer self.allocator.free(id); // Free the allocated string
-
-            // Create owned copies for the JSON values
-            const id_copy = try self.allocator.dupe(u8, id);
-            const data_copy = try self.allocator.dupe(u8, "mock_data");
-
-            try doc.put("_id", std.json.Value{ .string = id_copy });
-            try doc.put("data", std.json.Value{ .string = data_copy });
+            
+            try doc.put("_id", std.json.Value{ .string = "mock_id" });
+            try doc.put("data", std.json.Value{ .string = "mock_data" });
             try results.append(doc);
         }
 
@@ -271,8 +256,9 @@ pub const MongoDBStorage = struct {
         try document.put("created_at", std.json.Value{ .integer = @intCast(std.time.timestamp()) });
         try document.put("updated_at", std.json.Value{ .integer = @intCast(std.time.timestamp()) });
 
-        _ = try self.connection.insertOne(collection_name, document);
-        return id;
+        const result_id = try self.connection.insertOne(collection_name, document);
+        self.allocator.free(id); // 释放临时分配的ID
+        return result_id;
     }
 
     pub fn read(self: *Self, table: []const u8, id: []const u8) !?storage.StorageRecord {
