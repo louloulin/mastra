@@ -68,6 +68,12 @@ pub const DynamicToolDefinition = struct {
         expected_output: std.json.Value,
     };
 
+    pub fn deinit(self: *DynamicToolDefinition, allocator: std.mem.Allocator) void {
+        allocator.free(self.parameters);
+        allocator.free(self.tags);
+        allocator.free(self.examples);
+    }
+
     pub fn validateInput(self: *const DynamicToolDefinition, input: tool.ToolInput) !void {
         for (self.parameters) |param| {
             const value = input.data.object.get(param.name);
@@ -342,16 +348,21 @@ pub const ToolBuilder = struct {
             return error.MissingExecuteFunction;
         }
 
+        // 创建副本而不是转移所有权，这样可以避免内存泄漏
+        const parameters = try self.allocator.dupe(ParameterDefinition, self.parameters.items);
+        const tags = try self.allocator.dupe([]const u8, self.tags.items);
+        const examples = try self.allocator.dupe(DynamicToolDefinition.ToolExample, self.examples.items);
+
         return DynamicToolDefinition{
             .name = self.name.?,
             .description = self.description.?,
-            .parameters = try self.parameters.toOwnedSlice(),
+            .parameters = parameters,
             .execute_fn = self.execute_fn.?,
             .category = self.category,
             .version = self.version,
             .author = self.author,
-            .tags = try self.tags.toOwnedSlice(),
-            .examples = try self.examples.toOwnedSlice(),
+            .tags = tags,
+            .examples = examples,
         };
     }
 };
