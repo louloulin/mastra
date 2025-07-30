@@ -173,6 +173,14 @@ pub const VectorStore = struct {
         return final_results.toOwnedSlice();
     }
 
+    /// 释放搜索结果的内存
+    pub fn freeSearchResults(self: *VectorStore, results: []VectorDocument) void {
+        for (results) |doc| {
+            self.allocator.free(doc.embedding);
+        }
+        self.allocator.free(results);
+    }
+
     pub fn get(self: *VectorStore, id: []const u8) ?VectorDocument {
         if (self.documents.get(id)) |doc| {
             return VectorDocument{
