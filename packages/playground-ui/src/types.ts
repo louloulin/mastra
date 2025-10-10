@@ -1,23 +1,9 @@
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: any;
-  isError?: boolean;
-  parts?: Array<
-    | {
-        type: 'text';
-        text: string;
-      }
-    | {
-        type: 'step-start';
-      }
-    | {
-        type: 'reasoning';
-        reasoning: string;
-        details: Array<{ type: 'text'; text: string }>;
-      }
-  >;
-}
+import { GetAgentResponse } from '@mastra/client-js';
+import type { AiMessageType } from '@mastra/core/memory';
+import type { LLMStepResult } from '@mastra/core/agent';
+import { MastraUIMessage } from '@mastra/react';
+
+export type Message = AiMessageType;
 
 export interface AssistantMessage {
   id: string;
@@ -37,6 +23,14 @@ export interface AssistantMessage {
   };
 }
 
+export type ReadonlyJSONValue = null | string | number | boolean | ReadonlyJSONObject | ReadonlyJSONArray;
+
+export type ReadonlyJSONObject = {
+  readonly [key: string]: ReadonlyJSONValue;
+};
+
+export type ReadonlyJSONArray = readonly ReadonlyJSONValue[];
+
 export interface ModelSettings {
   frequencyPenalty?: number;
   presencePenalty?: number;
@@ -47,8 +41,10 @@ export interface ModelSettings {
   topK?: number;
   topP?: number;
   instructions?: string;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: LLMStepResult['providerMetadata'];
+  chatWithGenerateLegacy?: boolean;
   chatWithGenerate?: boolean;
+  chatWithNetwork?: boolean;
 }
 
 export interface AgentSettingsType {
@@ -58,12 +54,16 @@ export interface AgentSettingsType {
 export interface ChatProps {
   agentId: string;
   agentName?: string;
+  modelVersion?: string;
   threadId?: string;
-  initialMessages?: Message[];
+  initialMessages?: MastraUIMessage[];
+  initialLegacyMessages?: Message[];
   memory?: boolean;
   refreshThreadList?: () => void;
   settings?: AgentSettingsType;
   runtimeContext?: Record<string, any>;
+  onInputChange?: (value: string) => void;
+  modelList?: GetAgentResponse['modelList'];
 }
 
 export type SpanStatus = {
@@ -109,6 +109,13 @@ export type RefinedTrace = {
   status: SpanStatus;
   trace: Span[];
   runId?: string;
+};
+
+export type StreamChunk = {
+  type: string;
+  payload: any;
+  runId: string;
+  from: 'AGENT' | 'WORKFLOW';
 };
 
 export * from './domains/traces/types';

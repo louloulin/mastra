@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { google } from '@ai-sdk/google';
 import { openai } from '@ai-sdk/openai';
 import { Mastra } from '@mastra/core';
-import type { CoreMessage } from '@mastra/core';
+import type { UIMessageWithMetadata } from '@mastra/core/agent';
 import { Agent } from '@mastra/core/agent';
+import type { CoreMessage } from '@mastra/core/llm';
 import { RuntimeContext } from '@mastra/core/runtime-context';
 import { MockStore } from '@mastra/core/storage';
 import { fastembed } from '@mastra/fastembed';
@@ -42,6 +43,193 @@ describe('Agent Memory Tests', () => {
     await expect(agentMemory2.query({ threadId: '1' })).resolves.not.toThrow();
   });
 
+  it('should inherit storage from Mastra instance when workingMemory is enabled', async () => {
+    const mastra = new Mastra({
+      storage: new LibSQLStore({
+        url: dbFile,
+      }),
+      agents: {
+        testAgent: new Agent({
+          name: 'Test Agent',
+          instructions: 'You are a test agent',
+          model: openai('gpt-4o-mini'),
+          memory: new Memory({
+            options: {
+              workingMemory: {
+                enabled: true,
+              },
+            },
+          }),
+        }),
+      },
+    });
+
+    const agent = mastra.getAgent('testAgent');
+    const memory = await agent.getMemory();
+    expect(memory).toBeDefined();
+
+    // Should be able to create a thread and use working memory
+    const thread = await memory!.createThread({
+      resourceId: 'test-resource',
+      title: 'Test Thread',
+    });
+
+    expect(thread).toBeDefined();
+    expect(thread.id).toBeDefined();
+
+    // Should be able to update working memory without error
+    await memory!.updateWorkingMemory({
+      threadId: thread.id,
+      resourceId: 'test-resource',
+      workingMemory: '# Test Working Memory\n- Name: Test User',
+    });
+
+    // Should be able to retrieve working memory
+    const workingMemoryData = await memory!.getWorkingMemory({
+      threadId: thread.id,
+      resourceId: 'test-resource',
+    });
+
+    expect(workingMemoryData).toBe('# Test Working Memory\n- Name: Test User');
+  });
+
+  it('should work with resource-scoped working memory when storage supports it', async () => {
+    const mastra = new Mastra({
+      storage: new LibSQLStore({
+        url: dbFile,
+      }),
+      agents: {
+        testAgent: new Agent({
+          name: 'Test Agent',
+          instructions: 'You are a test agent',
+          model: openai('gpt-4o-mini'),
+          memory: new Memory({
+            options: {
+              workingMemory: {
+                enabled: true,
+                scope: 'resource',
+              },
+            },
+          }),
+        }),
+      },
+    });
+
+    const agent = mastra.getAgent('testAgent');
+    const memory = await agent.getMemory();
+
+    expect(memory).toBeDefined();
+
+    // Create a thread
+    const thread = await memory!.createThread({
+      resourceId: 'test-resource',
+      title: 'Test Thread',
+    });
+
+    // Update resource-scoped working memory
+    await memory!.updateWorkingMemory({
+      threadId: thread.id,
+      resourceId: 'test-resource',
+      workingMemory: '# Resource Memory\n- Shared across threads',
+    });
+
+    const workingMemoryData = await memory!.getWorkingMemory({
+      threadId: thread.id,
+      resourceId: 'test-resource',
+    });
+
+    expect(workingMemoryData).toBe('# Resource Memory\n- Shared across threads');
+  });
+
+  it('should call getMemoryMessages for first message in new thread when using resource-scoped semantic recall', async () => {
+    const storage = new LibSQLStore({
+      url: dbFile,
+    });
+    const vector = new LibSQLVector({
+      connectionUrl: dbFile,
+    });
+
+    const mastra = new Mastra({
+      storage,
+      vectors: { default: vector },
+      agents: {
+        testAgent: new Agent({
+          name: 'Test Agent',
+          instructions: 'You are a helpful assistant',
+          model: openai('gpt-4o-mini'),
+          memory: new Memory({
+            options: {
+              lastMessages: 5,
+              semanticRecall: {
+                topK: 5,
+                messageRange: 5,
+                scope: 'resource',
+              },
+            },
+            storage,
+            vector,
+            embedder: fastembed,
+          }),
+        }),
+      },
+    });
+
+    const agent = mastra.getAgent('testAgent');
+    const memory = (await agent.getMemory()) as Memory;
+    const resourceId = 'test-resource-semantic';
+
+    // First, create a thread and add some messages to establish history
+    const thread1Id = randomUUID();
+    await agent.generateLegacy('Tell me about cats', {
+      memory: {
+        thread: thread1Id,
+        resource: resourceId,
+      },
+    });
+
+    // Verify first thread has messages
+    const thread1Messages = await memory.query({ threadId: thread1Id, resourceId });
+    expect(thread1Messages.messages.length).toBeGreaterThan(0);
+
+    // Now create a second thread - this should be able to access memory from thread1
+    // due to resource scope, even on the first message
+    const thread2Id = randomUUID();
+
+    // Mock the getMemoryMessages method to track if it's called
+    let getMemoryMessagesCalled = false;
+    let retrievedMemoryMessages: any[] = [];
+    const originalGetMemoryMessages = (agent as any).getMemoryMessages;
+    (agent as any).getMemoryMessages = async (...args: any[]) => {
+      getMemoryMessagesCalled = true;
+      const result = await originalGetMemoryMessages.call(agent, ...args);
+      retrievedMemoryMessages = result || [];
+      return result;
+    };
+
+    const secondResponse = await agent.generateLegacy('What did we discuss about cats?', {
+      memory: {
+        thread: thread2Id,
+        resource: resourceId,
+      },
+    });
+
+    // Restore original method
+    (agent as any).getMemoryMessages = originalGetMemoryMessages;
+
+    expect(getMemoryMessagesCalled).toBe(true);
+
+    // Verify that getMemoryMessages actually returned messages from the first thread
+    expect(retrievedMemoryMessages.length).toBeGreaterThan(0);
+
+    // Verify that the retrieved messages contain content from the first thread
+    const hasMessagesFromFirstThread = retrievedMemoryMessages.some(
+      msg =>
+        msg.threadId === thread1Id || (typeof msg.content === 'string' && msg.content.toLowerCase().includes('cat')),
+    );
+    expect(hasMessagesFromFirstThread).toBe(true);
+    expect(secondResponse.text.toLowerCase()).toMatch(/(cat|animal|discuss)/);
+  });
+
   describe('Agent memory message persistence', () => {
     // making a separate memory for agent to avoid conflicts with other tests
     const memory = new Memory({
@@ -70,7 +258,7 @@ describe('Agent Memory Tests', () => {
       const resourceId = 'all-user-messages';
 
       // Send multiple user messages
-      await agent.generate(
+      await agent.generateLegacy(
         [
           { role: 'user', content: 'First message' },
           { role: 'user', content: 'Second message' },
@@ -95,13 +283,13 @@ describe('Agent Memory Tests', () => {
       const threadId = randomUUID();
       const resourceId = 'assistant-responses';
       // 1. Text mode
-      await agent.generate([{ role: 'user', content: 'What is 2+2?' }], {
+      await agent.generateLegacy([{ role: 'user', content: 'What is 2+2?' }], {
         threadId,
         resourceId,
       });
 
       // 2. Object/output mode
-      await agent.generate([{ role: 'user', content: 'Give me JSON' }], {
+      await agent.generateLegacy([{ role: 'user', content: 'Give me JSON' }], {
         threadId,
         resourceId,
         output: z.object({
@@ -142,7 +330,7 @@ describe('Agent Memory Tests', () => {
       const contextMessageContent2 = 'This is the second context message.';
 
       // Send user messages and context messages
-      await agent.generate(userMessageContent, {
+      await agent.generateLegacy(userMessageContent, {
         threadId,
         resourceId,
         context: [
@@ -165,6 +353,85 @@ describe('Agent Memory Tests', () => {
       const savedUserMessages = messages.filter((m: any) => m.role === 'user');
       expect(savedUserMessages.length).toBe(1);
       expect(savedUserMessages[0].content).toBe(userMessageContent);
+    });
+
+    it('should persist UIMessageWithMetadata through agent generate and memory', async () => {
+      const threadId = randomUUID();
+      const resourceId = 'ui-message-metadata';
+
+      // Create messages with metadata
+      const messagesWithMetadata: UIMessageWithMetadata[] = [
+        {
+          id: 'msg1',
+          role: 'user',
+          content: 'Hello with metadata',
+          parts: [{ type: 'text', text: 'Hello with metadata' }],
+          metadata: {
+            source: 'web-ui',
+            timestamp: Date.now(),
+            customField: 'custom-value',
+          },
+        },
+        {
+          id: 'msg2',
+          role: 'user',
+          content: 'Another message with different metadata',
+          parts: [{ type: 'text', text: 'Another message with different metadata' }],
+          metadata: {
+            source: 'mobile-app',
+            version: '1.0.0',
+            userId: 'user-123',
+          },
+        },
+      ];
+
+      // Send messages with metadata
+      await agent.generateLegacy(messagesWithMetadata, {
+        threadId,
+        resourceId,
+      });
+
+      // Fetch messages from memory
+      const agentMemory = (await agent.getMemory())!;
+      const { uiMessages } = await agentMemory.query({ threadId });
+
+      // Check that all user messages were saved
+      const savedUserMessages = uiMessages.filter((m: any) => m.role === 'user');
+      expect(savedUserMessages.length).toBe(2);
+
+      // Check that metadata was persisted in the stored messages
+      const firstMessage = uiMessages.find((m: any) => m.content === 'Hello with metadata');
+      const secondMessage = uiMessages.find((m: any) => m.content === 'Another message with different metadata');
+
+      expect(firstMessage).toBeDefined();
+      expect(firstMessage!.metadata).toEqual({
+        source: 'web-ui',
+        timestamp: expect.any(Number),
+        customField: 'custom-value',
+      });
+
+      expect(secondMessage).toBeDefined();
+      expect(secondMessage!.metadata).toEqual({
+        source: 'mobile-app',
+        version: '1.0.0',
+        userId: 'user-123',
+      });
+
+      // Check UI messages also preserve metadata
+      const firstUIMessage = uiMessages.find((m: any) => m.content === 'Hello with metadata');
+      const secondUIMessage = uiMessages.find((m: any) => m.content === 'Another message with different metadata');
+
+      expect(firstUIMessage?.metadata).toEqual({
+        source: 'web-ui',
+        timestamp: expect.any(Number),
+        customField: 'custom-value',
+      });
+
+      expect(secondUIMessage?.metadata).toEqual({
+        source: 'mobile-app',
+        version: '1.0.0',
+        userId: 'user-123',
+      });
     });
   });
 
@@ -229,8 +496,8 @@ describe('Agent Memory Tests', () => {
       expect(thread).toBeDefined();
       expect(thread?.metadata).toMatchObject(metadata);
 
-      await agentWithTitle.generate([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
-      await agentWithTitle.generate([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
+      await agentWithTitle.generateLegacy([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
+      await agentWithTitle.generateLegacy([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
 
       const existingThread = await memoryWithTitle.getThreadById({ threadId });
       expect(existingThread).toBeDefined();
@@ -253,7 +520,7 @@ describe('Agent Memory Tests', () => {
 
       const runtimeContext = new RuntimeContext();
       runtimeContext.set('model', 'gpt-4o-mini');
-      await agentWithDynamicModelTitle.generate([{ role: 'user', content: 'Hello, world!' }], {
+      await agentWithDynamicModelTitle.generateLegacy([{ role: 'user', content: 'Hello, world!' }], {
         threadId,
         resourceId,
         runtimeContext,
@@ -278,8 +545,8 @@ describe('Agent Memory Tests', () => {
       expect(thread).toBeDefined();
       expect(thread?.metadata).toMatchObject(metadata);
 
-      await agentNoTitle.generate([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
-      await agentNoTitle.generate([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
+      await agentNoTitle.generateLegacy([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
+      await agentNoTitle.generateLegacy([{ role: 'user', content: 'Hello, world!' }], { threadId, resourceId });
 
       const existingThread = await memoryNoTitle.getThreadById({ threadId });
       expect(existingThread).toBeDefined();
@@ -294,7 +561,7 @@ describe('Agent with message processors', () => {
     const resourceId = 'processor-filter-tool-message';
 
     // First, ask a question that will trigger a tool call
-    const firstResponse = await memoryProcessorAgent.generate('What is the weather in London?', {
+    const firstResponse = await memoryProcessorAgent.generateLegacy('What is the weather in London?', {
       threadId,
       resourceId,
     });
@@ -313,7 +580,7 @@ describe('Agent with message processors', () => {
 
     // Now, ask a follow-up question. The processor should prevent the tool call history
     // from being sent to the model.
-    const secondResponse = await memoryProcessorAgent.generate('What was the tool you just used?', {
+    const secondResponse = await memoryProcessorAgent.generateLegacy('What was the tool you just used?', {
       threadId,
       resourceId,
     });
@@ -334,7 +601,7 @@ describe('Agent.fetchMemory', () => {
     const threadId = randomUUID();
     const resourceId = 'fetch-memory-test';
 
-    const response = await weatherAgent.generate('Just a simple greeting to populate memory.', {
+    const response = await weatherAgent.generateLegacy('Just a simple greeting to populate memory.', {
       threadId,
       resourceId,
     });
@@ -361,7 +628,7 @@ describe('Agent.fetchMemory', () => {
     const threadId = randomUUID();
     const resourceId = 'fetch-memory-processor-test';
 
-    await memoryProcessorAgent.generate('What is the weather in London?', { threadId, resourceId });
+    await memoryProcessorAgent.generateLegacy('What is the weather in London?', { threadId, resourceId });
 
     const { messages } = await memoryProcessorAgent.fetchMemory({ threadId, resourceId });
 
@@ -415,7 +682,7 @@ describe('Agent memory test gemini', () => {
 
   it('should not throw error when using gemini', async () => {
     // generate two messages in the db
-    await agent.generate(`What's the weather in Tokyo?`, {
+    await agent.generateLegacy(`What's the weather in Tokyo?`, {
       memory: { resource, thread },
     });
 
@@ -424,7 +691,7 @@ describe('Agent memory test gemini', () => {
     // Will throw if the messages sent to the agent aren't cleaned up because a tool call message will be the first message sent to the agent
     // Which some providers like gemini will not allow.
     await expect(
-      agent.generate(`What's the weather in London?`, {
+      agent.generateLegacy(`What's the weather in London?`, {
         memory: { resource, thread },
       }),
     ).resolves.not.toThrow();

@@ -37,7 +37,7 @@ Execute steps simultaneously using `.parallel()`:
 
 ![Concurrent steps with .parallel()](/image/workflows/workflows-control-flow-parallel.jpg)
 
-```typescript {8,4-5} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
+```typescript {9,4-5} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
 import { createWorkflow, createStep } from "@mastra/core/workflows";
 import { z } from "zod";
 
@@ -53,7 +53,9 @@ export const testWorkflow = createWorkflow({...})
 
 This executes `step1` and `step2` concurrently, then continues to `step3` after both complete.
 
-> See [Parallel Execution with Steps](/examples/workflows/parallel-steps) for more information.
+> See [Parallel Execution with Steps](../../examples/workflows/parallel-steps.mdx) for more information.
+
+> 📹 Watch: How to run steps in parallel and optimize your Mastra workflow → [YouTube (3 minutes)](https://youtu.be/GQJxve5Hki4)
 
 ## Conditional logic with `.branch()`
 
@@ -70,15 +72,15 @@ const greaterThanStep = createStep({...});
 
 export const testWorkflow = createWorkflow({...})
   .branch([
-    [async ({ inputData: { value } }) => (value < 9), lessThanStep],
-    [async ({ inputData: { value } }) => (value >= 9), greaterThanStep]
+    [async ({ inputData: { value } }) => value <= 10, lessThanStep],
+    [async ({ inputData: { value } }) => value > 10, greaterThanStep]
   ])
   .commit();
 ```
 
 Branch conditions are evaluated sequentially, but steps with matching conditions are executed in parallel.
 
-> See [Workflow with Conditional Branching](/examples/workflows/conditional-branching) for more information.
+> See [Workflow with Conditional Branching](../../examples/workflows/conditional-branching.mdx) for more information.
 
 ## Looping steps
 
@@ -121,6 +123,60 @@ const counterStep = createStep({...});
 export const testWorkflow = createWorkflow({...})
   .dountil(counterStep, async ({ inputData: { number } }) => number > 10)
   .commit();
+```
+
+### Loop management
+
+Loop conditions can be implemented in different ways depending on how you want the loop to end. Common patterns include checking values returned in `inputData`, setting a maximum number of iterations, or aborting execution when a limit is reached.
+
+#### Conditional loops
+
+The `inputData` for a loop step is the output of a previous step. Use the values in `inputData` to determine whether the loop should continue or stop.
+
+```typescript {7} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
+import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { z } from "zod";
+
+const counterStep = createStep({...});
+
+export const testWorkflow = createWorkflow({...})
+.dountil(nestedWorkflowStep, async ({ inputData: { userResponse } }) => userResponse === "yes")
+.commit();
+```
+
+#### Limiting loops
+
+The `iterationCount` tracks how many times the loop step has run. You can use this to limit the number of iterations and prevent infinite loops. Combine it with `inputData` values to stop the loop after a set number of attempts.
+
+```typescript {7} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
+import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { z } from "zod";
+
+const counterStep = createStep({...});
+
+export const testWorkflow = createWorkflow({...})
+.dountil(nestedWorkflowStep, async ({ inputData: { userResponse, iterationCount } }) => userResponse === "yes" || iterationCount >= 10)
+.commit();
+```
+
+#### Aborting loops
+
+Use `iterationCount` to limit how many times a loop runs. If the count exceeds your threshold, throw an error to fail the step and stop the workflow.
+
+```typescript {7} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
+import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { z } from "zod";
+
+const counterStep = createStep({...});
+
+export const testWorkflow = createWorkflow({...})
+.dountil(nestedWorkflowStep, async ({ inputData: { userResponse, iterationCount } }) => {
+  if (iterationCount >= 10) {
+    throw new Error("Maximum iterations reached");
+  }
+  return userResponse === "yes";
+})
+.commit();
 ```
 
 ### Repeating with `.foreach()`
@@ -187,52 +243,6 @@ export const testWorkflow = createWorkflow({...})
   .then(clonedWorkflow)
   .commit();
 ```
-
-## Exiting early with `bail()`
-
-Use `bail()` in a step to exit early with a successful result. This returns the provided payload as the step output and ends workflow execution.
-
-```typescript {7} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
-import { createWorkflow, createStep } from "@mastra/core/workflows";
-import { z } from "zod";
-
-const step1 = createStep({
-  id: 'step1',
-  execute: async ({ bail }) => {
-    return bail({ result: 'bailed' });
-  },
-  inputSchema: z.object({ value: z.string() }),
-  outputSchema: z.object({ result: z.string() }),
-});
-
-export const testWorkflow = createWorkflow({...})
-  .then(step1)
-  .commit();
-```
-
-## Exiting early with `Error()`
-
-Use `throw new Error()` in a step to exit with an error.
-
-```typescript {7} filename="src/mastra/workflows/test-workflow.ts" showLineNumbers copy
-import { createWorkflow, createStep } from "@mastra/core/workflows";
-import { z } from "zod";
-
-const step1 = createStep({
-  id: 'step1',
-  execute: async () => {
-    throw new Error('bailed');
-  },
-  inputSchema: z.object({ value: z.string() }),
-  outputSchema: z.object({ result: z.string() }),
-});
-
-export const testWorkflow = createWorkflow({...})
-  .then(step1)
-  .commit();
-```
-
-This throws an error from the step and stops workflow execution, returning the error as the result.
 
 ## Example Run Instance
 

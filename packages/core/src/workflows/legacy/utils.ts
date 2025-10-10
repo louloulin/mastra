@@ -1,10 +1,10 @@
 import { get } from 'radash';
 import { z } from 'zod';
-import type { Mastra } from '../..';
 import type { ToolsInput } from '../../agent';
 import { Agent } from '../../agent';
 import type { Metric } from '../../eval';
 import type { IMastraLogger } from '../../logger';
+import type { Mastra } from '../../mastra';
 import type { LegacyStep as Step } from './step';
 import type {
   StepAction,
@@ -278,7 +278,7 @@ export function agentToStep<
         telemetry: realMastra.getTelemetry(),
       });
 
-      const result = await agent.generate(context.inputData.prompt, {
+      const result = await agent.generateLegacy(context.inputData.prompt, {
         runId,
         resourceId: context.inputData.resourceId,
         threadId: context.inputData.threadId,

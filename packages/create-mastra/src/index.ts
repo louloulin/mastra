@@ -25,7 +25,7 @@ program
       analytics.trackCommand({
         command: 'version',
       });
-      console.log(`create-mastra ${version}`);
+      console.info(`create-mastra ${version}`);
     } catch {
       // ignore
     }
@@ -39,7 +39,7 @@ program
     '-p, --project-name <string>',
     'Project name that will be used in package.json and as the project directory name.',
   )
-  .option('--default', 'Quick start with defaults(src, OpenAI, examples)')
+  .option('--default', 'Quick start with defaults (src, OpenAI, examples)')
   .option('-c, --components <components>', 'Comma-separated list of components (agents, tools, workflows)')
   .option('-l, --llm <model-provider>', 'Default model provider (openai, anthropic, groq, google, or cerebras)')
   .option('-k, --llm-api-key <api-key>', 'API key for the model provider')
@@ -50,7 +50,7 @@ program
   .option('-m, --mcp <mcp>', 'MCP Server for code editor (cursor, cursor-global, windsurf, vscode)')
   .option(
     '--template [template-name]',
-    'Create project from a template (use template name or leave blank to select from list)',
+    'Create project from a template (use template name, public GitHub URL, or leave blank to select from list)',
   )
   .action(async (projectNameArg, args) => {
     // Unify: use argument if present, else option
@@ -67,6 +67,7 @@ program
         mcpServer: args.mcp,
         directory: 'src/',
         template: args.template,
+        analytics,
       });
       return;
     }
@@ -75,13 +76,14 @@ program
       components: args.components ? args.components.split(',') : [],
       llmProvider: args.llm,
       addExample: args.example,
-      llmApiKey: args['llm-api-key'],
+      llmApiKey: args.llmApiKey,
       createVersionTag,
       timeout,
       projectName,
       directory: args.dir,
       mcpServer: args.mcp,
       template: args.template,
+      analytics,
     });
   });
 

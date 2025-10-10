@@ -11,7 +11,6 @@ import yoctoSpinner from 'yocto-spinner';
 
 import { DepsService } from '../../services/service.deps';
 import { FileService } from '../../services/service.file';
-import { logger } from '../../utils/logger';
 import {
   cursorGlobalMCPConfigPath,
   globalMCPIsAlreadyInstalled,
@@ -20,51 +19,27 @@ import {
 
 const exec = util.promisify(child_process.exec);
 
-export type LLMProvider = 'openai' | 'anthropic' | 'groq' | 'google' | 'cerebras';
+export type LLMProvider = 'openai' | 'anthropic' | 'groq' | 'google' | 'cerebras' | 'mistral';
 export type Components = 'agents' | 'workflows' | 'tools';
 
-export const getAISDKPackage = (llmProvider: LLMProvider) => {
-  switch (llmProvider) {
-    case 'openai':
-      return '@ai-sdk/openai';
-    case 'anthropic':
-      return '@ai-sdk/anthropic';
-    case 'groq':
-      return '@ai-sdk/groq';
-    case 'google':
-      return '@ai-sdk/google';
-    case 'cerebras':
-      return '@ai-sdk/cerebras';
-    default:
-      return '@ai-sdk/openai';
-  }
-};
-
-export const getProviderImportAndModelItem = (llmProvider: LLMProvider) => {
-  let providerImport = '';
-  let modelItem = '';
-
+export const getModelIdentifier = (llmProvider: LLMProvider) => {
   if (llmProvider === 'openai') {
-    providerImport = `import { openai } from '${getAISDKPackage(llmProvider)}';`;
-    modelItem = `openai('gpt-4o-mini')`;
+    return `'openai/gpt-4o-mini'`;
   } else if (llmProvider === 'anthropic') {
-    providerImport = `import { anthropic } from '${getAISDKPackage(llmProvider)}';`;
-    modelItem = `anthropic('claude-3-5-sonnet-20241022')`;
+    return `'anthropic/claude-3-5-sonnet-20241022'`;
   } else if (llmProvider === 'groq') {
-    providerImport = `import { groq } from '${getAISDKPackage(llmProvider)}';`;
-    modelItem = `groq('llama-3.3-70b-versatile')`;
+    return `'groq/llama-3.3-70b-versatile'`;
   } else if (llmProvider === 'google') {
-    providerImport = `import { google } from '${getAISDKPackage(llmProvider)}';`;
-    modelItem = `google('gemini-2.5-pro-exp-03-25')`;
+    return `'google/gemini-2.5-pro'`;
   } else if (llmProvider === 'cerebras') {
-    providerImport = `import { cerebras } from '${getAISDKPackage(llmProvider)}';`;
-    modelItem = `cerebras('llama-3.3-70b')`;
+    return `'cerebras/llama-3.3-70b'`;
+  } else if (llmProvider === 'mistral') {
+    return `'mistral/mistral-medium-2508'`;
   }
-  return { providerImport, modelItem };
 };
 
 export async function writeAgentSample(llmProvider: LLMProvider, destPath: string, addExampleTool: boolean) {
-  const { providerImport, modelItem } = getProviderImportAndModelItem(llmProvider);
+  const modelString = getModelIdentifier(llmProvider);
 
   const instructions = `
       You are a helpful weather assistant that provides accurate weather information and can help planning activities based on the weather.
@@ -81,7 +56,6 @@ export async function writeAgentSample(llmProvider: LLMProvider, destPath: strin
       ${addExampleTool ? 'Use the weatherTool to fetch current weather data.' : ''}
 `;
   const content = `
-${providerImport}
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { LibSQLStore } from '@mastra/libsql';
@@ -90,7 +64,7 @@ ${addExampleTool ? `import { weatherTool } from '../tools/weather-tool';` : ''}
 export const weatherAgent = new Agent({
   name: 'Weather Agent',
   instructions: \`${instructions}\`,
-  model: ${modelItem},
+  model: ${modelString},
   ${addExampleTool ? 'tools: { weatherTool },' : ''}
   memory: new Memory({
     storage: new LibSQLStore({
@@ -376,13 +350,21 @@ ${addAgent ? `import { weatherAgent } from './agents/weather-agent';` : ''}
 export const mastra = new Mastra({
   ${filteredExports.join('\n  ')}
   storage: new LibSQLStore({
-    // stores telemetry, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
+    // stores observability, scores, ... into memory storage, if it needs to persist, change to file:../mastra.db
     url: ":memory:",
   }),
   logger: new PinoLogger({
     name: 'Mastra',
     level: 'info',
   }),
+  telemetry: {
+    // Telemetry is deprecated and will be removed in the Nov 4th release
+    enabled: false, 
+  },
+  observability: {
+    // Enables DefaultExporter and CloudExporter for AI tracing
+    default: { enabled: true }, 
+  },
 });
 `,
     );
@@ -401,24 +383,30 @@ export const checkInitialization = async (dirPath: string) => {
 };
 
 export const checkAndInstallCoreDeps = async (addExample: boolean) => {
-  const depsService = new DepsService();
-  let depCheck = await depsService.checkDependencies(['@mastra/core']);
+  const depService = new DepsService();
+  const needsCore = (await depService.checkDependencies(['@mastra/core'])) !== `ok`;
+  const needsZod = (await depService.checkDependencies(['zod'])) !== `ok`;
 
-  if (depCheck !== 'ok') {
+  if (needsCore) {
     await installCoreDeps('@mastra/core');
   }
 
-  if (addExample) {
-    depCheck = await depsService.checkDependencies(['@mastra/libsql']);
+  if (needsZod) {
+    // TODO: Once the switch to AI SDK v5 is complete, this needs to be updated
+    await installCoreDeps('zod', '^3');
+  }
 
-    if (depCheck !== 'ok') {
+  if (addExample) {
+    const needsLibsql = (await depService.checkDependencies(['@mastra/libsql'])) !== `ok`;
+
+    if (needsLibsql) {
       await installCoreDeps('@mastra/libsql');
     }
   }
 };
 
 const spinner = yoctoSpinner({ text: 'Installing Mastra core dependencies\n' });
-export async function installCoreDeps(pkg: string) {
+export async function installCoreDeps(pkg: string, version = 'latest') {
   try {
     const confirm = await p.confirm({
       message: `You do not have the ${pkg} package installed. Would you like to install it?`,
@@ -439,8 +427,8 @@ export async function installCoreDeps(pkg: string) {
 
     const depsService = new DepsService();
 
-    await depsService.installPackages([`${pkg}@latest`]);
-    spinner.success('@mastra/core installed successfully');
+    await depsService.installPackages([`${pkg}@${version}`]);
+    spinner.success(`${pkg} installed successfully`);
   } catch (err) {
     console.error(err);
   }
@@ -461,22 +449,24 @@ export const getAPIKey = async (provider: LLMProvider) => {
     case 'cerebras':
       key = 'CEREBRAS_API_KEY';
       return key;
+    case 'mistral':
+      key = 'MISTRAL_API_KEY';
+      return key;
     default:
       return key;
   }
 };
 
-export const writeAPIKey = async ({
-  provider,
-  apiKey = 'your-api-key',
-}: {
-  provider: LLMProvider;
-  apiKey?: string;
-}) => {
+export const writeAPIKey = async ({ provider, apiKey }: { provider: LLMProvider; apiKey?: string }) => {
+  /**
+   * If people skip entering an API key (because they e.g. have it in their environment already), we write to .env.example instead of .env so that they can immediately run Mastra without having to delete an .env file with an invalid key.
+   */
+  const envFileName = apiKey ? '.env' : '.env.example';
+
   const key = await getAPIKey(provider);
   const escapedKey = shellQuote.quote([key]);
-  const escapedApiKey = shellQuote.quote([apiKey]);
-  await exec(`echo ${escapedKey}=${escapedApiKey} >> .env`);
+  const escapedApiKey = shellQuote.quote([apiKey ? apiKey : 'your-api-key']);
+  await exec(`echo ${escapedKey}=${escapedApiKey} >> ${envFileName}`);
 };
 export const createMastraDir = async (directory: string): Promise<{ ok: true; dirPath: string } | { ok: false }> => {
   let dir = directory
@@ -510,8 +500,31 @@ export const writeCodeSample = async (
   }
 };
 
-export const interactivePrompt = async () => {
-  p.intro(color.inverse(' Mastra Init '));
+const LLM_PROVIDERS: { value: LLMProvider; label: string; hint?: string }[] = [
+  { value: 'openai', label: 'OpenAI', hint: 'recommended' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'groq', label: 'Groq' },
+  { value: 'google', label: 'Google' },
+  { value: 'cerebras', label: 'Cerebras' },
+  { value: 'mistral', label: 'Mistral' },
+];
+
+interface InteractivePromptArgs {
+  options?: {
+    showBanner?: boolean;
+  };
+  skip?: {
+    llmProvider?: boolean;
+    llmApiKey?: boolean;
+  };
+}
+
+export const interactivePrompt = async (args: InteractivePromptArgs = {}) => {
+  const { skip = {}, options: { showBanner = true } = {} } = args;
+
+  if (showBanner) {
+    p.intro(color.inverse(' Mastra Init '));
+  }
   const mastraProject = await p.group(
     {
       directory: () =>
@@ -521,19 +534,18 @@ export const interactivePrompt = async () => {
           defaultValue: 'src/',
         }),
       llmProvider: () =>
-        p.select({
-          message: 'Select default provider:',
-          options: [
-            { value: 'openai', label: 'OpenAI', hint: 'recommended' },
-            { value: 'anthropic', label: 'Anthropic' },
-            { value: 'groq', label: 'Groq' },
-            { value: 'google', label: 'Google' },
-            { value: 'cerebras', label: 'Cerebras' },
-          ],
-        }),
+        skip?.llmProvider
+          ? undefined
+          : p.select({
+              message: 'Select a default provider:',
+              options: LLM_PROVIDERS,
+            }),
       llmApiKey: async ({ results: { llmProvider } }) => {
+        if (skip?.llmApiKey) return undefined;
+
+        const llmName = LLM_PROVIDERS.find(p => p.value === llmProvider)?.label || 'provider';
         const keyChoice = await p.select({
-          message: `Enter your ${llmProvider} API key?`,
+          message: `Enter your ${llmName} API key?`,
           options: [
             { value: 'skip', label: 'Skip for now', hint: 'default' },
             { value: 'enter', label: 'Enter API key' },
@@ -545,6 +557,9 @@ export const interactivePrompt = async () => {
           return p.text({
             message: 'Enter your API key:',
             placeholder: 'sk-...',
+            validate: value => {
+              if (value.length === 0) return 'API key cannot be empty';
+            },
           });
         }
         return undefined;
@@ -555,7 +570,7 @@ export const interactivePrompt = async () => {
         const vscodeIsAlreadyInstalled = await globalMCPIsAlreadyInstalled(`vscode`);
 
         const editor = await p.select({
-          message: `Make your AI IDE into a Mastra expert? (installs Mastra docs MCP server)`,
+          message: `Make your IDE into a Mastra expert? (Installs Mastra's MCP server)`,
           options: [
             { value: 'skip', label: 'Skip for now', hint: 'default' },
             {
@@ -637,23 +652,22 @@ export const interactivePrompt = async () => {
   return mastraProject;
 };
 
-export const checkPkgJson = async () => {
+/**
+ * Check if the current directory has a package.json file. If not, we should alert the user to create one or run "mastra create" to create a new project. The package.json file is required to install dependencies in the next steps.
+ */
+export const checkForPkgJson = async () => {
   const cwd = process.cwd();
   const pkgJsonPath = path.join(cwd, 'package.json');
 
-  let isPkgJsonPresent = false;
-
   try {
-    await fsExtra.readJSON(pkgJsonPath);
-    isPkgJsonPresent = true;
+    await fs.access(pkgJsonPath);
+
+    // Do nothing
   } catch {
-    isPkgJsonPresent = false;
-  }
+    p.log.error(
+      'No package.json file found in the current directory. Please run "npm init -y" to create one, or run "npx create-mastra@latest" to create a new Mastra project.',
+    );
 
-  if (isPkgJsonPresent) {
-    return;
+    process.exit(1);
   }
-
-  logger.debug('package.json not found, create one or run "mastra create" to create a new project');
-  process.exit(0);
 };

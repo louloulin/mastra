@@ -6,26 +6,24 @@ import type {
   CoreUserMessage as AiCoreUserMessage,
   EmbedManyResult as AiEmbedManyResult,
   EmbedResult as AiEmbedResult,
-  GenerateObjectResult,
-  GenerateTextResult,
-  StreamObjectResult,
-  StreamTextResult,
   TelemetrySettings,
   streamText,
   streamObject,
   generateText,
   generateObject,
   UIMessage,
+  StreamTextOnFinishCallback,
+  StreamObjectOnFinishCallback,
 } from 'ai';
+import type { SystemModelMessage } from 'ai-v5';
 import type { JSONSchema7 } from 'json-schema';
 import type { z, ZodSchema } from 'zod';
 
-import type { MastraLanguageModel } from '../agent/types';
+import type { TracingContext } from '../ai-tracing';
 import type { Run } from '../run/types';
 import type { RuntimeContext } from '../runtime-context';
 import type { CoreTool } from '../tools/types';
-
-export { createMockModel } from './model/mock';
+import type { MastraLanguageModel } from './model/shared.types';
 
 export type LanguageModel = MastraLanguageModel;
 
@@ -71,15 +69,28 @@ export type StructuredOutput = {
       };
 };
 
-export type GenerateReturn<Z extends ZodSchema | JSONSchema7 | undefined = undefined> = Z extends undefined
-  ? GenerateTextResult<any, Z extends ZodSchema ? z.infer<Z> : unknown>
-  : GenerateObjectResult<Z extends ZodSchema ? z.infer<Z> : unknown>;
-
-export type StreamReturn<Z extends ZodSchema | JSONSchema7 | undefined = undefined> = Z extends undefined
-  ? StreamTextResult<any, Z extends ZodSchema ? z.infer<Z> : unknown>
-  : StreamObjectResult<any, Z extends ZodSchema ? z.infer<Z> : unknown, any>;
+export type {
+  GenerateReturn,
+  StreamReturn,
+  GenerateObjectResult,
+  GenerateTextResult,
+  StreamObjectResult,
+  StreamTextResult,
+} from './model/base.types';
+export type { TripwireProperties, MastraModelConfig, OpenAICompatibleConfig } from './model/shared.types';
+export { ModelRouterLanguageModel } from './model/router';
+export { PROVIDER_REGISTRY, parseModelString, getProviderConfig } from './model/provider-registry.generated';
+export { resolveModelConfig } from './model/resolve-model';
 
 export type OutputType = StructuredOutput | ZodSchema | JSONSchema7 | undefined;
+
+export type SystemMessage =
+  | string
+  | string[]
+  | CoreSystemMessage
+  | SystemModelMessage
+  | CoreSystemMessage[]
+  | SystemModelMessage[];
 
 type GenerateTextOptions = Parameters<typeof generateText>[0];
 type StreamTextOptions = Parameters<typeof streamText>[0];
@@ -110,6 +121,7 @@ type MastraCustomLLMOptions<Z extends ZodSchema | JSONSchema7 | undefined = unde
   threadId?: string;
   resourceId?: string;
   runtimeContext: RuntimeContext;
+  tracingContext: TracingContext;
 } & Run;
 
 export type LLMTextOptions<Z extends ZodSchema | JSONSchema7 | undefined = undefined> = {
@@ -124,17 +136,19 @@ export type LLMTextObjectOptions<T extends ZodSchema | JSONSchema7 | undefined =
 
 export type LLMStreamOptions<Z extends ZodSchema | JSONSchema7 | undefined = undefined> = {
   output?: OutputType | Z;
-  onFinish?: (result: string) => Promise<void> | void;
+  onFinish?: StreamTextOnFinishCallback<any>;
 } & MastraCustomLLMOptions<Z> &
   DefaultLLMStreamOptions;
 
 export type LLMInnerStreamOptions<Z extends ZodSchema | JSONSchema7 | undefined = undefined> = {
   messages: UIMessage[] | CoreMessage[];
-  onFinish?: (result: string) => Promise<void> | void;
 } & MastraCustomLLMOptions<Z> &
   DefaultLLMStreamOptions;
 
-export type LLMStreamObjectOptions<T extends ZodSchema | JSONSchema7 | undefined = undefined> = {
-  structuredOutput: JSONSchema7 | z.ZodType<T> | StructuredOutput;
-} & LLMInnerStreamOptions<T> &
+export type LLMStreamObjectOptions<Z extends ZodSchema | JSONSchema7 | undefined = undefined> = {
+  structuredOutput: JSONSchema7 | z.ZodType<Z> | StructuredOutput;
+  onFinish?: StreamObjectOnFinishCallback<any>;
+} & LLMInnerStreamOptions<Z> &
   DefaultLLMStreamObjectOptions;
+
+export type { ProviderConfig } from './model/gateways/base';

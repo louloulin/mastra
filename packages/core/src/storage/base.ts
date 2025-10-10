@@ -1,8 +1,11 @@
 import type { MastraMessageContentV2, MastraMessageV2 } from '../agent';
+import type { TracingStrategy } from '../ai-tracing';
 import { MastraBase } from '../base';
+import { ErrorCategory, ErrorDomain, MastraError } from '../error';
 import type { MastraMessageV1, StorageThreadType } from '../memory/types';
+import type { ScoreRowData, ScoringSource, ValidatedSaveScorePayload } from '../scores';
 import type { Trace } from '../telemetry';
-import type { WorkflowRunState } from '../workflows';
+import type { StepResult, WorkflowRunState } from '../workflows/types';
 
 import {
   TABLE_WORKFLOW_SNAPSHOT,
@@ -11,20 +14,76 @@ import {
   TABLE_THREADS,
   TABLE_TRACES,
   TABLE_RESOURCES,
+  TABLE_SCORERS,
   TABLE_SCHEMAS,
+  TABLE_AI_SPANS,
 } from './constants';
 import type { TABLE_NAMES } from './constants';
+import type {
+  ScoresStorage,
+  StoreOperations,
+  WorkflowsStorage,
+  TracesStorage,
+  MemoryStorage,
+  LegacyEvalsStorage,
+  ObservabilityStorage,
+} from './domains';
 import type {
   EvalRow,
   PaginationInfo,
   StorageColumn,
   StorageGetMessagesArg,
-  StorageGetTracesArg,
   StorageResourceType,
+  StoragePagination,
+  ThreadSortOptions,
   WorkflowRun,
   WorkflowRuns,
+  StorageGetTracesArg,
+  PaginationArgs,
+  StorageGetTracesPaginatedArg,
+  AISpanRecord,
+  AITraceRecord,
+  AITracesPaginatedArg,
+  CreateIndexOptions,
+  IndexInfo,
+  StorageIndexStats,
+  UpdateAISpanRecord,
+  CreateAISpanRecord,
 } from './types';
 
+export type StorageDomains = {
+  legacyEvals: LegacyEvalsStorage;
+  operations: StoreOperations;
+  workflows: WorkflowsStorage;
+  scores: ScoresStorage;
+  traces: TracesStorage;
+  memory: MemoryStorage;
+  observability?: ObservabilityStorage;
+};
+
+export function ensureDate(date: Date | string | undefined): Date | undefined {
+  if (!date) return undefined;
+  return date instanceof Date ? date : new Date(date);
+}
+
+export function serializeDate(date: Date | string | undefined): string | undefined {
+  if (!date) return undefined;
+  const dateObj = ensureDate(date);
+  return dateObj?.toISOString();
+}
+
+export function resolveMessageLimit({
+  last,
+  defaultLimit,
+}: {
+  last: number | false | undefined;
+  defaultLimit: number;
+}): number {
+  // TODO: Figure out consistent default limit for all stores as some stores use 40 and some use no limit (Number.MAX_SAFE_INTEGER)
+  if (typeof last === 'number') return Math.max(0, last);
+  if (last === false) return 0;
+  return defaultLimit;
+}
 export abstract class MastraStorage extends MastraBase {
   /** @deprecated import from { TABLE_WORKFLOW_SNAPSHOT } '@mastra/core/storage' instead */
   static readonly TABLE_WORKFLOW_SNAPSHOT = TABLE_WORKFLOW_SNAPSHOT;
@@ -40,6 +99,8 @@ export abstract class MastraStorage extends MastraBase {
   protected hasInitialized: null | Promise<boolean> = null;
   protected shouldCacheInit = true;
 
+  stores?: StorageDomains;
+
   constructor({ name }: { name: string }) {
     super({
       component: 'STORAGE',
@@ -50,22 +111,31 @@ export abstract class MastraStorage extends MastraBase {
   public get supports(): {
     selectByIncludeResourceScope: boolean;
     resourceWorkingMemory: boolean;
+    hasColumn: boolean;
+    createTable: boolean;
+    deleteMessages: boolean;
+    aiTracing?: boolean;
+    indexManagement?: boolean;
+    getScoresBySpan?: boolean;
   } {
     return {
       selectByIncludeResourceScope: false,
       resourceWorkingMemory: false,
+      hasColumn: false,
+      createTable: false,
+      deleteMessages: false,
+      aiTracing: false,
+      indexManagement: false,
+      getScoresBySpan: false,
     };
   }
 
   protected ensureDate(date: Date | string | undefined): Date | undefined {
-    if (!date) return undefined;
-    return date instanceof Date ? date : new Date(date);
+    return ensureDate(date);
   }
 
   protected serializeDate(date: Date | string | undefined): string | undefined {
-    if (!date) return undefined;
-    const dateObj = this.ensureDate(date);
-    return dateObj?.toISOString();
+    return serializeDate(date);
   }
 
   /**
@@ -82,10 +152,7 @@ export abstract class MastraStorage extends MastraBase {
     last: number | false | undefined;
     defaultLimit: number;
   }): number {
-    // TODO: Figure out consistent default limit for all stores as some stores use 40 and some use no limit (Number.MAX_SAFE_INTEGER)
-    if (typeof last === 'number') return Math.max(0, last);
-    if (last === false) return 0;
-    return defaultLimit;
+    return resolveMessageLimit({ last, defaultLimit });
   }
 
   protected getSqlType(type: StorageColumn['type']): string {
@@ -94,6 +161,8 @@ export abstract class MastraStorage extends MastraBase {
         return 'TEXT';
       case 'timestamp':
         return 'TIMESTAMP';
+      case 'float':
+        return 'FLOAT';
       case 'integer':
         return 'INTEGER';
       case 'bigint':
@@ -113,6 +182,7 @@ export abstract class MastraStorage extends MastraBase {
       case 'timestamp':
         return "DEFAULT '1970-01-01 00:00:00'";
       case 'integer':
+      case 'float':
       case 'bigint':
         return 'DEFAULT 0';
       case 'jsonb':
@@ -125,6 +195,8 @@ export abstract class MastraStorage extends MastraBase {
   abstract createTable({ tableName }: { tableName: TABLE_NAMES; schema: Record<string, StorageColumn> }): Promise<void>;
 
   abstract clearTable({ tableName }: { tableName: TABLE_NAMES }): Promise<void>;
+
+  abstract dropTable({ tableName }: { tableName: TABLE_NAMES }): Promise<void>;
 
   abstract alterTable(args: {
     tableName: TABLE_NAMES;
@@ -143,14 +215,21 @@ export abstract class MastraStorage extends MastraBase {
   }): Promise<void>;
 
   batchTraceInsert({ records }: { records: Record<string, any>[] }): Promise<void> {
+    if (this.stores?.traces) {
+      return this.stores.traces.batchTraceInsert({ records });
+    }
     return this.batchInsert({ tableName: TABLE_TRACES, records });
   }
 
-  abstract load<R>({ tableName, keys }: { tableName: TABLE_NAMES; keys: Record<string, string> }): Promise<R | null>;
+  abstract load<R>({ tableName, keys }: { tableName: TABLE_NAMES; keys: Record<string, any> }): Promise<R | null>;
 
   abstract getThreadById({ threadId }: { threadId: string }): Promise<StorageThreadType | null>;
 
-  abstract getThreadsByResourceId({ resourceId }: { resourceId: string }): Promise<StorageThreadType[]>;
+  abstract getThreadsByResourceId({
+    resourceId,
+    orderBy,
+    sortDirection,
+  }: { resourceId: string } & ThreadSortOptions): Promise<StorageThreadType[]>;
 
   abstract saveThread({ thread }: { thread: StorageThreadType }): Promise<StorageThreadType>;
 
@@ -202,6 +281,14 @@ export abstract class MastraStorage extends MastraBase {
     selectBy,
     format,
   }: StorageGetMessagesArg & { format?: 'v1' | 'v2' }): Promise<MastraMessageV1[] | MastraMessageV2[]>;
+  abstract getMessagesById({ messageIds }: { messageIds: string[]; format: 'v1' }): Promise<MastraMessageV1[]>;
+  abstract getMessagesById({ messageIds }: { messageIds: string[]; format?: 'v2' }): Promise<MastraMessageV2[]>;
+  abstract getMessagesById({
+    messageIds,
+  }: {
+    messageIds: string[];
+    format?: 'v1' | 'v2';
+  }): Promise<MastraMessageV1[] | MastraMessageV2[]>;
 
   abstract saveMessages(args: { messages: MastraMessageV1[]; format?: undefined | 'v1' }): Promise<MastraMessageV1[]>;
   abstract saveMessages(args: { messages: MastraMessageV2[]; format: 'v2' }): Promise<MastraMessageV2[]>;
@@ -217,7 +304,16 @@ export abstract class MastraStorage extends MastraBase {
       }[];
   }): Promise<MastraMessageV2[]>;
 
-  abstract getTraces(args: StorageGetTracesArg): Promise<any[]>;
+  async deleteMessages(_messageIds: string[]): Promise<void> {
+    throw new Error(
+      `Message deletion is not supported by this storage adapter (${this.constructor.name}). ` +
+        `The deleteMessages method needs to be implemented in the storage adapter.`,
+    );
+  }
+
+  abstract getTraces(args: StorageGetTracesArg): Promise<Trace[]>;
+
+  abstract getTracesPaginated(args: StorageGetTracesPaginatedArg): Promise<PaginationInfo & { traces: Trace[] }>;
 
   async init(): Promise<void> {
     // to prevent race conditions, await any current init
@@ -250,6 +346,11 @@ export abstract class MastraStorage extends MastraBase {
         tableName: TABLE_TRACES,
         schema: TABLE_SCHEMAS[TABLE_TRACES],
       }),
+
+      this.createTable({
+        tableName: TABLE_SCORERS,
+        schema: TABLE_SCHEMAS[TABLE_SCORERS],
+      }),
     ];
 
     // Only create resources table for storage adapters that support it
@@ -258,6 +359,15 @@ export abstract class MastraStorage extends MastraBase {
         this.createTable({
           tableName: TABLE_RESOURCES,
           schema: TABLE_SCHEMAS[TABLE_RESOURCES],
+        }),
+      );
+    }
+
+    if (this.supports.aiTracing) {
+      tableCreationTasks.push(
+        this.createTable({
+          tableName: TABLE_AI_SPANS,
+          schema: TABLE_SCHEMAS[TABLE_AI_SPANS],
         }),
       );
     }
@@ -271,15 +381,27 @@ export abstract class MastraStorage extends MastraBase {
       schema: TABLE_SCHEMAS[TABLE_MESSAGES],
       ifNotExists: ['resourceId'],
     });
+    await this?.alterTable?.({
+      tableName: TABLE_WORKFLOW_SNAPSHOT,
+      schema: TABLE_SCHEMAS[TABLE_WORKFLOW_SNAPSHOT],
+      ifNotExists: ['resourceId'],
+    });
+    await this?.alterTable?.({
+      tableName: TABLE_SCORERS,
+      schema: TABLE_SCHEMAS[TABLE_SCORERS],
+      ifNotExists: ['spanId'],
+    });
   }
 
   async persistWorkflowSnapshot({
     workflowName,
     runId,
+    resourceId,
     snapshot,
   }: {
     workflowName: string;
     runId: string;
+    resourceId?: string;
     snapshot: WorkflowRunState;
   }): Promise<void> {
     await this.init();
@@ -287,6 +409,7 @@ export abstract class MastraStorage extends MastraBase {
     const data = {
       workflow_name: workflowName,
       run_id: runId,
+      resourceId,
       snapshot,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -297,6 +420,35 @@ export abstract class MastraStorage extends MastraBase {
       record: data,
     });
   }
+
+  abstract updateWorkflowResults({
+    workflowName,
+    runId,
+    stepId,
+    result,
+  }: {
+    workflowName: string;
+    runId: string;
+    stepId: string;
+    result: StepResult<any, any, any, any>;
+    runtimeContext: Record<string, any>;
+  }): Promise<Record<string, StepResult<any, any, any, any>>>;
+
+  abstract updateWorkflowState({
+    workflowName,
+    runId,
+    opts,
+  }: {
+    workflowName: string;
+    runId: string;
+    opts: {
+      status: string;
+      result?: StepResult<any, any, any, any>;
+      error?: string;
+      suspendedPaths?: Record<string, number[]>;
+      waitingPaths?: Record<string, number[]>;
+    };
+  }): Promise<WorkflowRunState | undefined>;
 
   async loadWorkflowSnapshot({
     workflowName,
@@ -317,6 +469,70 @@ export abstract class MastraStorage extends MastraBase {
     return d ? d.snapshot : null;
   }
 
+  /**
+   * SCORERS
+   */
+
+  abstract getScoreById({ id }: { id: string }): Promise<ScoreRowData | null>;
+
+  abstract saveScore(score: ValidatedSaveScorePayload): Promise<{ score: ScoreRowData }>;
+
+  abstract getScoresByScorerId({
+    scorerId,
+    pagination,
+    entityId,
+    entityType,
+    source,
+  }: {
+    scorerId: string;
+    pagination: StoragePagination;
+    entityId?: string;
+    entityType?: string;
+    source?: ScoringSource;
+  }): Promise<{ pagination: PaginationInfo; scores: ScoreRowData[] }>;
+
+  abstract getScoresByRunId({
+    runId,
+    pagination,
+  }: {
+    runId: string;
+    pagination: StoragePagination;
+  }): Promise<{ pagination: PaginationInfo; scores: ScoreRowData[] }>;
+
+  abstract getScoresByEntityId({
+    entityId,
+    entityType,
+    pagination,
+  }: {
+    pagination: StoragePagination;
+    entityId: string;
+    entityType: string;
+  }): Promise<{ pagination: PaginationInfo; scores: ScoreRowData[] }>;
+
+  async getScoresBySpan({
+    traceId,
+    spanId,
+    pagination: _pagination,
+  }: {
+    traceId: string;
+    spanId: string;
+    pagination: StoragePagination;
+  }): Promise<{ pagination: PaginationInfo; scores: ScoreRowData[] }> {
+    throw new MastraError({
+      id: 'SCORES_STORAGE_GET_SCORES_BY_SPAN_NOT_IMPLEMENTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      details: { traceId, spanId },
+    });
+  }
+
+  abstract getEvals(
+    options: {
+      agentName?: string;
+      type?: 'test' | 'live';
+    } & PaginationArgs,
+  ): Promise<PaginationInfo & { evals: EvalRow[] }>;
+
   abstract getEvalsByAgentName(agentName: string, type?: 'test' | 'live'): Promise<EvalRow[]>;
 
   abstract getWorkflowRuns(args?: {
@@ -330,15 +546,221 @@ export abstract class MastraStorage extends MastraBase {
 
   abstract getWorkflowRunById(args: { runId: string; workflowName?: string }): Promise<WorkflowRun | null>;
 
-  abstract getTracesPaginated(args: StorageGetTracesArg): Promise<PaginationInfo & { traces: Trace[] }>;
-
-  abstract getThreadsByResourceIdPaginated(args: {
-    resourceId: string;
-    page: number;
-    perPage: number;
-  }): Promise<PaginationInfo & { threads: StorageThreadType[] }>;
+  abstract getThreadsByResourceIdPaginated(
+    args: {
+      resourceId: string;
+      page: number;
+      perPage: number;
+    } & ThreadSortOptions,
+  ): Promise<PaginationInfo & { threads: StorageThreadType[] }>;
 
   abstract getMessagesPaginated(
     args: StorageGetMessagesArg & { format?: 'v1' | 'v2' },
   ): Promise<PaginationInfo & { messages: MastraMessageV1[] | MastraMessageV2[] }>;
+
+  /**
+   * OBSERVABILITY
+   */
+
+  /**
+   * Provides hints for AI tracing strategy selection by the DefaultExporter.
+   * Storage adapters can override this to specify their preferred and supported strategies.
+   */
+  public get aiTracingStrategy(): {
+    preferred: TracingStrategy;
+    supported: TracingStrategy[];
+  } {
+    if (this.stores?.observability) {
+      return this.stores.observability.aiTracingStrategy;
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_TRACING_STRATEGY_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Creates a single AI span record in the storage provider.
+   */
+  async createAISpan(span: CreateAISpanRecord): Promise<void> {
+    if (this.stores?.observability) {
+      return this.stores.observability.createAISpan(span);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_CREATE_AI_SPAN_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Updates a single AI span with partial data. Primarily used for realtime trace creation.
+   */
+  async updateAISpan(params: { spanId: string; traceId: string; updates: Partial<UpdateAISpanRecord> }): Promise<void> {
+    if (this.stores?.observability) {
+      return this.stores.observability.updateAISpan(params);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_UPDATE_AI_SPAN_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Retrieves a single AI trace with all its associated spans.
+   */
+  async getAITrace(traceId: string): Promise<AITraceRecord | null> {
+    if (this.stores?.observability) {
+      return this.stores.observability.getAITrace(traceId);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_GET_AI_TRACE_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Retrieves a paginated list of AI traces with optional filtering.
+   */
+  async getAITracesPaginated(
+    args: AITracesPaginatedArg,
+  ): Promise<{ pagination: PaginationInfo; spans: AISpanRecord[] }> {
+    if (this.stores?.observability) {
+      return this.stores.observability.getAITracesPaginated(args);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_GET_AI_TRACES_PAGINATED_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Creates multiple AI spans in a single batch.
+   */
+  async batchCreateAISpans(args: { records: CreateAISpanRecord[] }): Promise<void> {
+    if (this.stores?.observability) {
+      return this.stores.observability.batchCreateAISpans(args);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_BATCH_CREATE_AI_SPANS_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Updates multiple AI spans in a single batch.
+   */
+  async batchUpdateAISpans(args: {
+    records: {
+      traceId: string;
+      spanId: string;
+      updates: Partial<UpdateAISpanRecord>;
+    }[];
+  }): Promise<void> {
+    if (this.stores?.observability) {
+      return this.stores.observability.batchUpdateAISpans(args);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_BATCH_UPDATE_AI_SPANS_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Deletes multiple AI traces and all their associated spans in a single batch operation.
+   */
+  async batchDeleteAITraces(args: { traceIds: string[] }): Promise<void> {
+    if (this.stores?.observability) {
+      return this.stores.observability.batchDeleteAITraces(args);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_BATCH_DELETE_AI_TRACES_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `AI tracing is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * DATABASE INDEX MANAGEMENT
+   * These methods delegate to the operations store for index management.
+   * Storage adapters that support indexes should implement these in their operations class.
+   */
+
+  /**
+   * Creates a database index on specified columns
+   * @throws {MastraError} if not supported by the storage adapter
+   */
+  async createIndex(options: CreateIndexOptions): Promise<void> {
+    if (this.stores?.operations) {
+      return this.stores.operations.createIndex(options);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_CREATE_INDEX_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `Index management is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Drops a database index by name
+   * @throws {MastraError} if not supported by the storage adapter
+   */
+  async dropIndex(indexName: string): Promise<void> {
+    if (this.stores?.operations) {
+      return this.stores.operations.dropIndex(indexName);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_DROP_INDEX_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `Index management is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Lists database indexes for a table or all tables
+   * @throws {MastraError} if not supported by the storage adapter
+   */
+  async listIndexes(tableName?: string): Promise<IndexInfo[]> {
+    if (this.stores?.operations) {
+      return this.stores.operations.listIndexes(tableName);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_LIST_INDEXES_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `Index management is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
+
+  /**
+   * Gets detailed statistics for a specific index
+   * @throws {MastraError} if not supported by the storage adapter
+   */
+  async describeIndex(indexName: string): Promise<StorageIndexStats> {
+    if (this.stores?.operations) {
+      return this.stores.operations.describeIndex(indexName);
+    }
+    throw new MastraError({
+      id: 'MASTRA_STORAGE_DESCRIBE_INDEX_NOT_SUPPORTED',
+      domain: ErrorDomain.STORAGE,
+      category: ErrorCategory.SYSTEM,
+      text: `Index management is not supported by this storage adapter (${this.constructor.name})`,
+    });
+  }
 }

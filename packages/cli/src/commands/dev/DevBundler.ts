@@ -2,10 +2,12 @@ import { writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FileService } from '@mastra/deployer';
-import { createWatcher, getWatcherInputOptions, writeTelemetryConfig } from '@mastra/deployer/build';
+import { createWatcher, getWatcherInputOptions, writeTelemetryConfig, getBundlerOptions } from '@mastra/deployer/build';
 import { Bundler } from '@mastra/deployer/bundler';
 import * as fsExtra from 'fs-extra';
 import type { RollupWatcherEvent } from 'rollup';
+
+import { devLogger } from '../../utils/dev-logger.js';
 
 export class DevBundler extends Bundler {
   private customEnvFile?: string;
@@ -40,23 +42,41 @@ export class DevBundler extends Bundler {
     const __dirname = dirname(__filename);
 
     const playgroundServePath = join(outputDirectory, this.outputDir, 'playground');
-    await fsExtra.copy(join(dirname(__dirname), 'src/playground/dist'), playgroundServePath, {
+    await fsExtra.copy(join(dirname(__dirname), 'dist/playground'), playgroundServePath, {
       overwrite: true,
     });
   }
 
-  async watch(entryFile: string, outputDirectory: string, toolsPaths: string[]): ReturnType<typeof createWatcher> {
+  async watch(
+    entryFile: string,
+    outputDirectory: string,
+    toolsPaths: (string | string[])[],
+  ): ReturnType<typeof createWatcher> {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
 
     const envFiles = await this.getEnvFiles();
-    const inputOptions = await getWatcherInputOptions(entryFile, 'node', {
-      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
-    });
+
+    let sourcemapEnabled = false;
+    try {
+      const bundlerOptions = await getBundlerOptions(entryFile, outputDirectory);
+      sourcemapEnabled = !!bundlerOptions?.sourcemap;
+    } catch (error) {
+      this.logger.debug('Failed to get bundler options, sourcemap will be disabled', { error });
+    }
+
+    const inputOptions = await getWatcherInputOptions(
+      entryFile,
+      'node',
+      {
+        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
+      },
+      { sourcemap: sourcemapEnabled },
+    );
     const toolsInputOptions = await this.getToolsInputOptions(toolsPaths);
 
     const outputDir = join(outputDirectory, this.outputDir);
-    await writeTelemetryConfig(entryFile, outputDir);
+    await writeTelemetryConfig(entryFile, outputDir, this.logger);
 
     const mastraFolder = dirname(entryFile);
     const fileService = new FileService();
@@ -136,22 +156,22 @@ export class DevBundler extends Bundler {
       },
       {
         dir: outputDir,
-        sourcemap: true,
+        sourcemap: sourcemapEnabled,
       },
     );
 
-    this.logger.info('Starting watcher...');
+    devLogger.info('Preparing development environment...');
     return new Promise((resolve, reject) => {
       const cb = (event: RollupWatcherEvent) => {
         if (event.code === 'BUNDLE_END') {
-          this.logger.info('Bundling finished, starting server...');
+          devLogger.success('Initial bundle complete');
           watcher.off('event', cb);
           resolve(watcher);
         }
 
         if (event.code === 'ERROR') {
-          console.log(event);
-          this.logger.error('Bundling failed, stopping watcher...');
+          console.info(event);
+          devLogger.error('Bundling failed - check console for details');
           watcher.off('event', cb);
           reject(event);
         }

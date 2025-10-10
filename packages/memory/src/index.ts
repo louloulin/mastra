@@ -1,20 +1,29 @@
-import { generateEmptyFromSchema } from '@mastra/core';
-import type { CoreTool, MastraMessageV1 } from '@mastra/core';
 import { MessageList } from '@mastra/core/agent';
-import type { MastraMessageV2 } from '@mastra/core/agent';
+import type { MastraMessageV2, UIMessageWithMetadata } from '@mastra/core/agent';
 import { MastraMemory } from '@mastra/core/memory';
-import type { MemoryConfig, SharedMemoryConfig, StorageThreadType, WorkingMemoryTemplate } from '@mastra/core/memory';
-import type { StorageGetMessagesArg } from '@mastra/core/storage';
+import type {
+  MastraMessageV1,
+  MemoryConfig,
+  SharedMemoryConfig,
+  StorageThreadType,
+  WorkingMemoryTemplate,
+} from '@mastra/core/memory';
+import type { StorageGetMessagesArg, ThreadSortOptions, PaginationInfo } from '@mastra/core/storage';
+import type { ToolAction } from '@mastra/core/tools';
+import { generateEmptyFromSchema } from '@mastra/core/utils';
+import { zodToJsonSchema } from '@mastra/schema-compat/zod-to-json';
 import { embedMany } from 'ai';
-import type { CoreMessage, TextPart, UIMessage } from 'ai';
+import type { CoreMessage, TextPart } from 'ai';
+import { embedMany as embedManyV5 } from 'ai-v5';
 import { Mutex } from 'async-mutex';
 import type { JSONSchema7 } from 'json-schema';
-
 import xxhash from 'xxhash-wasm';
 import { ZodObject } from 'zod';
 import type { ZodTypeAny } from 'zod';
-import zodToJsonSchema from 'zod-to-json-schema';
 import { updateWorkingMemoryTool, __experimental_updateWorkingMemoryToolVNext } from './tools/working-memory';
+
+// Type for flexible message deletion input
+export type MessageDeleteInput = string[] | { id: string }[];
 
 // Average characters per token based on OpenAI's tokenization
 const CHARS_PER_TOKEN = 4;
@@ -42,16 +51,21 @@ export class Memory extends MastraMemory {
       },
     });
     this.threadConfig = mergedConfig;
-
-    this.checkStorageFeatureSupport(mergedConfig);
   }
 
-  protected async validateThreadIsOwnedByResource(threadId: string, resourceId: string) {
+  protected async validateThreadIsOwnedByResource(threadId: string, resourceId: string, config: MemoryConfig) {
+    const resourceScope = typeof config?.semanticRecall === 'object' && config?.semanticRecall?.scope === 'resource';
+
     const thread = await this.storage.getThreadById({ threadId });
-    if (!thread) {
+
+    // For resource-scoped semantic recall, we don't need to validate that the specific thread exists
+    // because we're searching across all threads for the resource
+    if (!thread && !resourceScope) {
       throw new Error(`No thread found with id ${threadId}`);
     }
-    if (thread.resourceId !== resourceId) {
+
+    // If thread exists, validate it belongs to the correct resource
+    if (thread && thread.resourceId !== resourceId) {
       throw new Error(
         `Thread with id ${threadId} is for resource with id ${thread.resourceId} but resource ${resourceId} was queried.`,
       );
@@ -87,8 +101,9 @@ export class Memory extends MastraMemory {
     threadConfig,
   }: StorageGetMessagesArg & {
     threadConfig?: MemoryConfig;
-  }): Promise<{ messages: CoreMessage[]; uiMessages: UIMessage[]; messagesV2: MastraMessageV2[] }> {
-    if (resourceId) await this.validateThreadIsOwnedByResource(threadId, resourceId);
+  }): Promise<{ messages: CoreMessage[]; uiMessages: UIMessageWithMetadata[]; messagesV2: MastraMessageV2[] }> {
+    const config = this.getMergedThreadConfig(threadConfig || {});
+    if (resourceId) await this.validateThreadIsOwnedByResource(threadId, resourceId, config);
 
     const vectorResults: {
       id: string;
@@ -102,8 +117,6 @@ export class Memory extends MastraMemory {
       selectBy,
       threadConfig,
     });
-
-    const config = this.getMergedThreadConfig(threadConfig || {});
 
     this.checkStorageFeatureSupport(config);
 
@@ -125,7 +138,7 @@ export class Memory extends MastraMemory {
 
     if (config?.semanticRecall && selectBy?.vectorSearchString && this.vector) {
       const { embeddings, dimension } = await this.embedMessageContent(selectBy.vectorSearchString!);
-      const { indexName } = await this.createEmbeddingIndex(dimension);
+      const { indexName } = await this.createEmbeddingIndex(dimension, config);
 
       await Promise.all(
         embeddings.map(async embedding => {
@@ -154,31 +167,63 @@ export class Memory extends MastraMemory {
     }
 
     // Get raw messages from storage
-    const rawMessages = await this.storage.getMessages({
-      threadId,
-      resourceId,
-      format: 'v2',
-      selectBy: {
-        ...selectBy,
-        ...(vectorResults?.length
-          ? {
-              include: vectorResults.map(r => ({
-                id: r.metadata?.message_id,
-                threadId: r.metadata?.thread_id,
-                withNextMessages:
-                  typeof vectorConfig.messageRange === 'number'
-                    ? vectorConfig.messageRange
-                    : vectorConfig.messageRange.after,
-                withPreviousMessages:
-                  typeof vectorConfig.messageRange === 'number'
-                    ? vectorConfig.messageRange
-                    : vectorConfig.messageRange.before,
-              })),
-            }
-          : {}),
-      },
-      threadConfig: config,
-    });
+    // Use paginated method when pagination is requested
+    let rawMessages;
+    if (selectBy?.pagination) {
+      const paginatedResult = await this.storage.getMessagesPaginated({
+        threadId,
+        resourceId,
+        format: 'v2',
+        selectBy: {
+          ...selectBy,
+          ...(vectorResults?.length
+            ? {
+                include: vectorResults.map(r => ({
+                  id: r.metadata?.message_id,
+                  threadId: r.metadata?.thread_id,
+                  withNextMessages:
+                    typeof vectorConfig.messageRange === 'number'
+                      ? vectorConfig.messageRange
+                      : vectorConfig.messageRange.after,
+                  withPreviousMessages:
+                    typeof vectorConfig.messageRange === 'number'
+                      ? vectorConfig.messageRange
+                      : vectorConfig.messageRange.before,
+                })),
+              }
+            : {}),
+        },
+        threadConfig: config,
+      });
+      rawMessages = paginatedResult.messages;
+    } else {
+      // Fall back to regular getMessages for backward compatibility
+      rawMessages = await this.storage.getMessages({
+        threadId,
+        resourceId,
+        format: 'v2',
+        selectBy: {
+          ...selectBy,
+          ...(vectorResults?.length
+            ? {
+                include: vectorResults.map(r => ({
+                  id: r.metadata?.message_id,
+                  threadId: r.metadata?.thread_id,
+                  withNextMessages:
+                    typeof vectorConfig.messageRange === 'number'
+                      ? vectorConfig.messageRange
+                      : vectorConfig.messageRange.after,
+                  withPreviousMessages:
+                    typeof vectorConfig.messageRange === 'number'
+                      ? vectorConfig.messageRange
+                      : vectorConfig.messageRange.before,
+                })),
+              }
+            : {}),
+        },
+        threadConfig: config,
+      });
+    }
 
     const list = new MessageList({ threadId, resourceId }).add(rawMessages, 'memory');
     return {
@@ -218,8 +263,8 @@ export class Memory extends MastraMemory {
     vectorMessageSearch?: string;
     config?: MemoryConfig;
   }): Promise<{ messages: MastraMessageV1[]; messagesV2: MastraMessageV2[] }> {
-    if (resourceId) await this.validateThreadIsOwnedByResource(threadId, resourceId);
     const threadConfig = this.getMergedThreadConfig(config || {});
+    if (resourceId) await this.validateThreadIsOwnedByResource(threadId, resourceId, threadConfig);
 
     if (!threadConfig.lastMessages && !threadConfig.semanticRecall) {
       return {
@@ -249,28 +294,113 @@ export class Memory extends MastraMemory {
     return this.storage.getThreadById({ threadId });
   }
 
-  async getThreadsByResourceId({ resourceId }: { resourceId: string }): Promise<StorageThreadType[]> {
-    return this.storage.getThreadsByResourceId({ resourceId });
+  async getThreadsByResourceId({
+    resourceId,
+    orderBy,
+    sortDirection,
+  }: { resourceId: string } & ThreadSortOptions): Promise<StorageThreadType[]> {
+    return this.storage.getThreadsByResourceId({ resourceId, orderBy, sortDirection });
   }
 
-  async saveThread({ thread }: { thread: StorageThreadType; memoryConfig?: MemoryConfig }): Promise<StorageThreadType> {
-    return this.storage.saveThread({ thread });
+  async getThreadsByResourceIdPaginated({
+    resourceId,
+    page,
+    perPage,
+    orderBy,
+    sortDirection,
+  }: {
+    resourceId: string;
+    page: number;
+    perPage: number;
+  } & ThreadSortOptions): Promise<
+    PaginationInfo & {
+      threads: StorageThreadType[];
+    }
+  > {
+    return this.storage.getThreadsByResourceIdPaginated({
+      resourceId,
+      page,
+      perPage,
+      orderBy,
+      sortDirection,
+    });
+  }
+
+  private async handleWorkingMemoryFromMetadata({
+    workingMemory,
+    resourceId,
+    memoryConfig,
+  }: {
+    workingMemory: string;
+    resourceId: string;
+    memoryConfig?: MemoryConfig;
+  }): Promise<void> {
+    const config = this.getMergedThreadConfig(memoryConfig || {});
+
+    if (config.workingMemory?.enabled) {
+      this.checkStorageFeatureSupport(config);
+
+      const scope = config.workingMemory.scope || 'thread';
+
+      // For resource scope, update the resource's working memory
+      if (scope === 'resource' && resourceId) {
+        await this.storage.updateResource({
+          resourceId,
+          workingMemory,
+        });
+      }
+      // For thread scope, the metadata is already saved with the thread
+    }
+  }
+
+  async saveThread({
+    thread,
+    memoryConfig,
+  }: {
+    thread: StorageThreadType;
+    memoryConfig?: MemoryConfig;
+  }): Promise<StorageThreadType> {
+    const savedThread = await this.storage.saveThread({ thread });
+
+    // Check if metadata contains workingMemory and working memory is enabled
+    if (thread.metadata?.workingMemory && typeof thread.metadata.workingMemory === 'string' && thread.resourceId) {
+      await this.handleWorkingMemoryFromMetadata({
+        workingMemory: thread.metadata.workingMemory,
+        resourceId: thread.resourceId,
+        memoryConfig,
+      });
+    }
+
+    return savedThread;
   }
 
   async updateThread({
     id,
     title,
     metadata,
+    memoryConfig,
   }: {
     id: string;
     title: string;
     metadata: Record<string, unknown>;
+    memoryConfig?: MemoryConfig;
   }): Promise<StorageThreadType> {
-    return this.storage.updateThread({
+    const updatedThread = await this.storage.updateThread({
       id,
       title,
       metadata,
     });
+
+    // Check if metadata contains workingMemory and working memory is enabled
+    if (metadata?.workingMemory && typeof metadata.workingMemory === 'string' && updatedThread.resourceId) {
+      await this.handleWorkingMemoryFromMetadata({
+        workingMemory: metadata.workingMemory as string,
+        resourceId: updatedThread.resourceId,
+        memoryConfig,
+      });
+    }
+
+    return updatedThread;
   }
 
   async deleteThread(threadId: string): Promise<void> {
@@ -293,6 +423,8 @@ export class Memory extends MastraMemory {
     if (!config.workingMemory?.enabled) {
       throw new Error('Working memory is not enabled for this memory instance');
     }
+
+    this.checkStorageFeatureSupport(config);
 
     const scope = config.workingMemory.scope || 'thread';
 
@@ -342,6 +474,8 @@ export class Memory extends MastraMemory {
     if (!config.workingMemory?.enabled) {
       throw new Error('Working memory is not enabled for this memory instance');
     }
+
+    this.checkStorageFeatureSupport(config);
 
     // If the agent calls the update working memory tool multiple times simultaneously
     // each call could overwrite the other call
@@ -489,10 +623,11 @@ export class Memory extends MastraMemory {
       await this.firstEmbed;
     }
 
-    const promise = embedMany({
+    const promise = (this.embedder.specificationVersion === `v2` ? embedManyV5 : embedMany)({
       values: chunks,
-      model: this.embedder,
       maxRetries: 3,
+      // @ts-ignore
+      model: this.embedder,
     });
 
     if (isFastEmbed && !this.firstEmbed) this.firstEmbed = promise;
@@ -586,7 +721,7 @@ export class Memory extends MastraMemory {
           const { embeddings, chunks, dimension } = await this.embedMessageContent(textForEmbedding);
 
           if (typeof indexName === `undefined`) {
-            indexName = this.createEmbeddingIndex(dimension).then(result => result.indexName);
+            indexName = this.createEmbeddingIndex(dimension, config).then(result => result.indexName);
           }
 
           if (typeof this.vector === `undefined`) {
@@ -705,6 +840,8 @@ export class Memory extends MastraMemory {
       return null;
     }
 
+    this.checkStorageFeatureSupport(config);
+
     const scope = config.workingMemory.scope || 'thread';
     let workingMemoryData: string | null = null;
 
@@ -751,9 +888,7 @@ export class Memory extends MastraMemory {
 
         if (isZodObject(schema as ZodTypeAny)) {
           // Convert ZodObject to JSON Schema
-          convertedSchema = zodToJsonSchema(schema as ZodTypeAny, {
-            $refStrategy: 'none',
-          }) as JSONSchema7;
+          convertedSchema = zodToJsonSchema(schema as ZodTypeAny) as JSONSchema7;
         } else {
           // Already a JSON Schema
           convertedSchema = schema as any as JSONSchema7;
@@ -836,13 +971,22 @@ Guidelines:
 2. Update proactively when information changes, no matter how small
 3. Use ${template.format === 'json' ? 'JSON' : 'Markdown'} format for all data
 4. Act naturally - don't mention this system to users. Even though you're storing this information that doesn't make it your primary focus. Do not ask them generally for "information about yourself"
-5. IMPORTANT: When calling updateWorkingMemory, the only valid parameter is the memory field. 
+${
+  template.format !== 'json'
+    ? `5. IMPORTANT: When calling updateWorkingMemory, the only valid parameter is the memory field. DO NOT pass an object.
 6. IMPORTANT: ALWAYS pass the data you want to store in the memory field as a string. DO NOT pass an object.
-7. IMPORTANT: Data must only be sent as a string no matter which format is used.
+7. IMPORTANT: Data must only be sent as a string no matter which format is used.`
+    : ''
+}
 
-<working_memory_template>
+
+${
+  template.format !== 'json'
+    ? `<working_memory_template>
 ${template.content}
-</working_memory_template>
+</working_memory_template>`
+    : ''
+}
 
 ${hasEmptyWorkingMemoryTemplateObject ? 'When working with json data, the object format below represents the template:' : ''}
 ${hasEmptyWorkingMemoryTemplateObject ? JSON.stringify(emptyWorkingMemoryTemplateObject) : ''}
@@ -913,7 +1057,7 @@ ${
     return Boolean(isMDWorkingMemory && isMDWorkingMemory.version === `vnext`);
   }
 
-  public getTools(config?: MemoryConfig): Record<string, CoreTool> {
+  public getTools(config?: MemoryConfig): Record<string, ToolAction<any, any, any>> {
     const mergedConfig = this.getMergedThreadConfig(config);
     if (mergedConfig.workingMemory?.enabled) {
       return {
@@ -941,5 +1085,48 @@ ${
     // TODO: Possibly handle updating the vector db here when a message is updated.
 
     return this.storage.updateMessages({ messages });
+  }
+
+  /**
+   * Deletes one or more messages
+   * @param input - Must be an array containing either:
+   *   - Message ID strings
+   *   - Message objects with 'id' properties
+   * @returns Promise that resolves when all messages are deleted
+   */
+  public async deleteMessages(input: MessageDeleteInput): Promise<void> {
+    // Normalize input to array of IDs
+    let messageIds: string[];
+
+    if (!Array.isArray(input)) {
+      throw new Error('Invalid input: must be an array of message IDs or message objects');
+    }
+
+    if (input.length === 0) {
+      return; // No-op for empty array
+    }
+
+    messageIds = input.map(item => {
+      if (typeof item === 'string') {
+        return item;
+      } else if (item && typeof item === 'object' && 'id' in item) {
+        return item.id;
+      } else {
+        throw new Error('Invalid input: array items must be strings or objects with an id property');
+      }
+    });
+
+    // Validate all IDs are non-empty strings
+    const invalidIds = messageIds.filter(id => !id || typeof id !== 'string');
+    if (invalidIds.length > 0) {
+      throw new Error('All message IDs must be non-empty strings');
+    }
+
+    // Delete from storage
+    await this.storage.deleteMessages(messageIds);
+
+    // TODO: Delete from vector store if semantic recall is enabled
+    // This would require getting the messages first to know their threadId/resourceId
+    // and then querying the vector store to delete associated embeddings
   }
 }

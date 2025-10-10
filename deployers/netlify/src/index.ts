@@ -32,11 +32,15 @@ export class NetlifyDeployer extends Deployer {
     await super.prepare(outputDirectory);
   }
 
-  async bundle(entryFile: string, outputDirectory: string, toolsPaths: string[]): Promise<void> {
+  async bundle(
+    entryFile: string,
+    outputDirectory: string,
+    { toolsPaths, projectRoot }: { toolsPaths: (string | string[])[]; projectRoot: string },
+  ): Promise<void> {
     const result = await this._bundle(
       this.getEntry(),
       entryFile,
-      outputDirectory,
+      { outputDirectory, projectRoot },
       toolsPaths,
       join(outputDirectory, this.outputDir),
     );
@@ -63,10 +67,12 @@ export class NetlifyDeployer extends Deployer {
     return `
     import { handle } from 'hono/netlify'
     import { mastra } from '#mastra';
-    import { createHonoServer } from '#server';
+    import { createHonoServer, getToolExports } from '#server';
+    import { tools } from '#tools';
     import { evaluate } from '@mastra/core/eval';
     import { AvailableHooks, registerHook } from '@mastra/core/hooks';
     import { TABLE_EVALS } from '@mastra/core/storage';
+    import { scoreTracesWorkflow } from '@mastra/core/scores/scoreTraces';
     import { checkEvalStorageFields } from '@mastra/core/utils';
 
     registerHook(AvailableHooks.ON_GENERATION, ({ input, output, metric, runId, agentName, instructions }) => {
@@ -80,6 +86,10 @@ export class NetlifyDeployer extends Deployer {
         instructions,
       });
     });
+
+    if (mastra.getStorage()) {
+      mastra.__registerInternalWorkflow(scoreTracesWorkflow);
+    }
 
     registerHook(AvailableHooks.ON_EVALUATION, async traceObject => {
       const storage = mastra.getStorage();
@@ -107,13 +117,13 @@ export class NetlifyDeployer extends Deployer {
       }
     });
 
-    const app = await createHonoServer(mastra);
+    const app = await createHonoServer(mastra, { tools: getToolExports(tools) });
 
     export default handle(app)
 `;
   }
 
-  async lint(entryFile: string, outputDirectory: string, toolsPaths: string[]): Promise<void> {
+  async lint(entryFile: string, outputDirectory: string, toolsPaths: (string | string[])[]): Promise<void> {
     await super.lint(entryFile, outputDirectory, toolsPaths);
 
     // Lint for netlify support

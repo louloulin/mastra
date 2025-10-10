@@ -7,20 +7,12 @@ description: Learn how to interact with Mastra AI agents, including generating r
 
 The Agents API provides methods to interact with Mastra AI agents, including generating responses, streaming interactions, and managing agent tools.
 
-## Initialize Mastra Client
-
-```typescript
-import { MastraClient } from "@mastra/client-js";
-
-const client = new MastraClient();
-```
-
 ## Getting All Agents
 
 Retrieve a list of all available agents:
 
 ```typescript
-const agents = await client.getAgents();
+const agents = await mastraClient.getAgents();
 ```
 
 ## Working with a Specific Agent
@@ -28,7 +20,7 @@ const agents = await client.getAgents();
 Get an instance of a specific agent:
 
 ```typescript
-const agent = client.getAgent("agent-id");
+const agent = mastraClient.getAgent("agent-id");
 ```
 
 ## Agent Methods
@@ -54,7 +46,7 @@ const response = await agent.generate({
     },
   ],
   threadId: "thread-1", // Optional: Thread ID for conversation context
-  resourceid: "resource-1", // Optional: Resource ID
+  resourceId: "resource-1", // Optional: Resource ID
   output: {}, // Optional: Output configuration
 });
 ```
@@ -89,7 +81,7 @@ response.processDataStream({
   },
 });
 
-// Process text stream with the processTextStream util 
+// Process text stream with the processTextStream util
 // (used with structured output)
  response.processTextStream({
       onTextPart: text => {
@@ -113,7 +105,7 @@ Client-side tools allow you to execute custom functions on the client side when 
 #### Basic Usage
 
 ```typescript
-import { createTool } from '@mastra/core/tools';
+import { createTool } from '@mastra/client-js';
 import { z } from 'zod';
 
 const colorChangeTool = createTool({
@@ -165,4 +157,45 @@ const evals = await agent.evals();
 
 // Get live evaluations
 const liveEvals = await agent.liveEvals();
+```
+
+
+### Stream
+
+
+Stream responses using the enhanced API with improved method signatures. This method provides enhanced capabilities and format flexibility, with support for Mastra's native format.
+
+```typescript
+const response = await agent.stream(
+  "Tell me a story",
+  {
+    threadId: "thread-1",
+    clientTools: { colorChangeTool },
+  }
+);
+
+// Process the stream
+response.processDataStream({
+  onChunk: (chunk) => {
+    console.log(chunk);
+  },
+});
+```
+
+Currently, AI SDK V5 format is not supported in the client SDK.
+For AI SDK v5 compatible format, leverage the `@mastra/ai-sdk` package
+[AI SDK v5 Stream Compatibility](/docs/frameworks/agentic-uis/ai-sdk#enabling-stream-compatibility)
+
+### Generate
+
+Generate a response using the enhanced API with improved method signatures and AI SDK v5 compatibility:
+
+```typescript
+const response = await agent.generate(
+  "Hello, how are you?",
+  {
+    threadId: "thread-1",
+    resourceId: "resource-1",
+  }
+);
 ```

@@ -1,5 +1,6 @@
 import type { KVNamespace } from '@cloudflare/workers-types';
 import type { StorageThreadType, MastraMessageV2 } from '@mastra/core/memory';
+import type { ScoreRowData } from '@mastra/core/scores';
 import type {
   TABLE_MESSAGES,
   TABLE_THREADS,
@@ -10,6 +11,9 @@ import type {
   TABLE_NAMES,
   EvalRow,
   StorageResourceType,
+  TABLE_SCORERS,
+  TABLE_AI_SPANS,
+  AISpanRecord,
 } from '@mastra/core/storage';
 import type { WorkflowRunState } from '@mastra/core/workflows';
 
@@ -72,8 +76,10 @@ export type RecordTypes = {
   [TABLE_MESSAGES]: MastraMessageV2;
   [TABLE_WORKFLOW_SNAPSHOT]: WorkflowRunState;
   [TABLE_EVALS]: EvalRow;
+  [TABLE_SCORERS]: ScoreRowData;
   [TABLE_TRACES]: any;
   [TABLE_RESOURCES]: StorageResourceType;
+  [TABLE_AI_SPANS]: AISpanRecord;
 };
 
 export type ListOptions = {

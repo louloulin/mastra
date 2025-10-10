@@ -1,27 +1,14 @@
-import child_process from 'node:child_process';
-import util from 'node:util';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 
 import { DepsService } from '../../services/service.deps';
-import { getPackageManagerInstallCommand } from '../utils';
 
 import { installMastraDocsMCPServer } from './mcp-docs-server-install';
 import type { Editor } from './mcp-docs-server-install';
-import {
-  createComponentsDir,
-  createMastraDir,
-  getAISDKPackage,
-  getAPIKey,
-  writeAPIKey,
-  writeCodeSample,
-  writeIndexFile,
-} from './utils';
+import { createComponentsDir, createMastraDir, getAPIKey, writeAPIKey, writeCodeSample, writeIndexFile } from './utils';
 import type { Components, LLMProvider } from './utils';
 
 const s = p.spinner();
-
-const exec = util.promisify(child_process.exec);
 
 export const init = async ({
   directory,
@@ -86,12 +73,6 @@ export const init = async ({
     }
 
     const key = await getAPIKey(llmProvider || 'openai');
-
-    const aiSdkPackage = getAISDKPackage(llmProvider);
-    const depsService = new DepsService();
-    const pm = depsService.packageManager;
-    const installCommand = getPackageManagerInstallCommand(pm);
-    await exec(`${pm} ${installCommand} ${aiSdkPackage}`);
 
     if (configureEditorWithDocsMCP) {
       await installMastraDocsMCPServer({
